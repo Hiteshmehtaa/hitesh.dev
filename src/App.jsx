@@ -51,7 +51,7 @@ function App() {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
-  // Three.js Background - Scroll Journey
+  // Three.js Background - Logical Scroll Journey
   useEffect(() => {
     if (prefersReducedMotion || !canvasContainerRef.current) return;
 
@@ -62,86 +62,78 @@ function App() {
 
     const scene = new THREE.Scene();
     const fogColor = theme === 'dark' ? 0x0B0C10 : 0xF5F3EF;
-    scene.fog = new THREE.FogExp2(fogColor, 0.02);
+    scene.fog = new THREE.Fog(fogColor, 10, 80);
 
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(0, 0, 5);
 
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: "high-performance" });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
 
-    // Dynamic Lighting
+    // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
     
-    const colorLight = new THREE.PointLight(theme === 'dark' ? 0x66FCF1 : 0x8FAF8C, 50, 100);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+    dirLight.position.set(10, 20, 10);
+    scene.add(dirLight);
+
+    const colorLight = new THREE.PointLight(theme === 'dark' ? 0x66FCF1 : 0x8FAF8C, 100, 100);
     scene.add(colorLight);
 
-    // Create the "Tunnel" Environment
-    const objectsGroup = new THREE.Group();
-    scene.add(objectsGroup);
+    // --- Station 0: Hero Core (z = 0) ---
+    const coreGeo = new THREE.OctahedronGeometry(2, 0);
+    const coreMat = new THREE.MeshPhysicalMaterial({ color: theme === 'dark' ? 0x1F2833 : 0xE0DDD6, wireframe: true, transparent: true, opacity: 0.3 });
+    const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+    coreMesh.position.set(0, 0, 0);
+    scene.add(coreMesh);
 
-    const geoTypes = [
-      new THREE.IcosahedronGeometry(1, 0),
-      new THREE.OctahedronGeometry(1, 0),
-      new THREE.TetrahedronGeometry(1, 0)
-    ];
+    // --- Station 1: About Sphere (z = -50) ---
+    const sphereGeo = new THREE.IcosahedronGeometry(3, 1);
+    const sphereMat = new THREE.MeshPhysicalMaterial({ color: 0x8FAF8C, wireframe: true, transparent: true, opacity: 0.4 });
+    const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
+    sphereMesh.position.set(5, -2, -50);
+    scene.add(sphereMesh);
 
-    const materials = [
-      new THREE.MeshPhysicalMaterial({ color: 0x8FAF8C, metalness: 0.2, roughness: 0.1, transmission: 0.9, thickness: 1 }),
-      new THREE.MeshPhysicalMaterial({ color: theme === 'dark' ? 0x66FCF1 : 0x1A1A1A, metalness: 0.5, roughness: 0.2, clearcoat: 1 }),
-      new THREE.MeshBasicMaterial({ color: theme === 'dark' ? 0x1F2833 : 0xE0DDD6, wireframe: true })
-    ];
+    // --- Station 2: Experience Pillars (z = -100) ---
+    const pillarsGroup = new THREE.Group();
+    const pillarGeo = new THREE.BoxGeometry(1, 10, 1);
+    const pillarMat = new THREE.MeshPhysicalMaterial({ color: theme === 'dark' ? 0x1A1A1A : 0xDDDDDD, metalness: 0.5, roughness: 0.2, clearcoat: 1 });
+    for (let i = 0; i < 5; i++) {
+      const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+      pillar.position.set(-6 + i * 3, -5 + i * 1.5, -100 - i * 5);
+      pillarsGroup.add(pillar);
+    }
+    scene.add(pillarsGroup);
 
-    const meshes = [];
-    const objectCount = 150;
+    // --- Station 3: Project Gallery Screens (z = -150) ---
+    const textureLoader = new THREE.TextureLoader();
+    const screensGroup = new THREE.Group();
+    const screenGeo = new THREE.PlaneGeometry(8, 4.5);
     
-    for (let i = 0; i < objectCount; i++) {
-      const geo = geoTypes[Math.floor(Math.random() * geoTypes.length)];
-      const mat = materials[Math.floor(Math.random() * materials.length)];
-      const mesh = new THREE.Mesh(geo, mat);
-      
-      // Distribute along Z-axis (0 to -200)
-      mesh.position.x = (Math.random() - 0.5) * 40;
-      mesh.position.y = (Math.random() - 0.5) * 40;
-      mesh.position.z = -Math.random() * 200;
-      
-      mesh.rotation.x = Math.random() * Math.PI;
-      mesh.rotation.y = Math.random() * Math.PI;
-      
-      // Keep clear center path
-      if (Math.abs(mesh.position.x) < 3 && Math.abs(mesh.position.y) < 3) {
-        mesh.position.x += 4 * Math.sign(mesh.position.x || 1);
-      }
+    const matHiresia = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    textureLoader.load(projectsData.hiresia.image, (tex) => { matHiresia.map = tex; matHiresia.needsUpdate = true; });
+    const screen1 = new THREE.Mesh(screenGeo, matHiresia);
+    screen1.position.set(-5, 0, -150);
+    screen1.rotation.y = Math.PI / 6;
+    screensGroup.add(screen1);
 
-      meshes.push({
-        mesh,
-        rx: (Math.random() - 0.5) * 0.02,
-        ry: (Math.random() - 0.5) * 0.02
-      });
-      objectsGroup.add(mesh);
-    }
+    const matRapid = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    textureLoader.load(projectsData.rapidrescue.image, (tex) => { matRapid.map = tex; matRapid.needsUpdate = true; });
+    const screen2 = new THREE.Mesh(screenGeo, matRapid);
+    screen2.position.set(5, -3, -160);
+    screen2.rotation.y = -Math.PI / 6;
+    screensGroup.add(screen2);
+    scene.add(screensGroup);
 
-    // Particles
-    const particlesGeo = new THREE.BufferGeometry();
-    const particleCountNum = 1500;
-    const posArray = new Float32Array(particleCountNum * 3);
-    for(let i = 0; i < particleCountNum * 3; i++) {
-      posArray[i * 3] = (Math.random() - 0.5) * 60;
-      posArray[i * 3 + 1] = (Math.random() - 0.5) * 60;
-      posArray[i * 3 + 2] = -Math.random() * 200 + 10;
-    }
-    particlesGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
-    const particlesMat = new THREE.PointsMaterial({
-      size: 0.05,
-      color: theme === 'dark' ? 0x66FCF1 : 0x8FAF8C,
-      transparent: true,
-      opacity: 0.6
-    });
-    const particles = new THREE.Points(particlesGeo, particlesMat);
-    scene.add(particles);
+    // --- Station 4: Contact Portal (z = -200) ---
+    const portalGeo = new THREE.TorusGeometry(4, 0.2, 16, 100);
+    const portalMat = new THREE.MeshBasicMaterial({ color: theme === 'dark' ? 0x66FCF1 : 0x8FAF8C });
+    const portalMesh = new THREE.Mesh(portalGeo, portalMat);
+    portalMesh.position.set(0, 0, -200);
+    scene.add(portalMesh);
 
     let mouseX = 0; let mouseY = 0;
     const onMouseMove = (event) => {
@@ -162,28 +154,34 @@ function App() {
       reqId = requestAnimationFrame(animate);
       time += 0.01;
 
-      // Rotate objects
-      meshes.forEach(m => {
-        m.mesh.rotation.x += m.rx;
-        m.mesh.rotation.y += m.ry;
-      });
+      // Animations
+      coreMesh.rotation.y = time * 0.2;
+      coreMesh.rotation.x = time * 0.1;
+
+      sphereMesh.rotation.y = time * -0.1;
+      
+      screen1.position.y = Math.sin(time) * 0.5;
+      screen2.position.y = -3 + Math.sin(time + Math.PI) * 0.5;
+
+      portalMesh.rotation.z = time * 0.5;
 
       // Move camera based on scroll
       const documentHeight = document.documentElement.scrollHeight - window.innerHeight;
       const scrollPercent = documentHeight > 0 ? scrollY / documentHeight : 0;
       
-      const targetZ = 5 - (scrollPercent * 180); // Travel from z=5 to z=-175
+      // We have 5 stations spanning z=0 to z=-200. Max target = -200.
+      const targetZ = 5 - (scrollPercent * 205); 
       
-      camera.position.z += (targetZ - camera.position.z) * 0.1; // Lerp
+      camera.position.z += (targetZ - camera.position.z) * 0.1;
       
       // Parallax mouse effect
       camera.position.x += (mouseX * 5 - camera.position.x) * 0.05;
       camera.position.y += (-mouseY * 5 - camera.position.y) * 0.05;
       
-      // Slow rotation of camera based on scroll and mouse
-      camera.rotation.z = mouseX * 0.2 + Math.sin(time * 0.5) * 0.05;
+      // Subtle tilt
+      camera.rotation.z = mouseX * 0.1 + Math.sin(time * 0.5) * 0.02;
 
-      colorLight.position.z = camera.position.z - 20;
+      colorLight.position.z = camera.position.z - 5;
       colorLight.position.x = Math.sin(time) * 10;
       colorLight.position.y = Math.cos(time) * 10;
 
@@ -212,10 +210,13 @@ function App() {
       if (container && renderer.domElement) {
         container.removeChild(renderer.domElement);
       }
-      geoTypes.forEach(g => g.dispose());
-      materials.forEach(m => m.dispose());
-      particlesGeo.dispose();
-      particlesMat.dispose();
+      
+      // Cleanup
+      coreGeo.dispose(); coreMat.dispose();
+      sphereGeo.dispose(); sphereMat.dispose();
+      pillarGeo.dispose(); pillarMat.dispose();
+      screenGeo.dispose(); matHiresia.dispose(); matRapid.dispose();
+      portalGeo.dispose(); portalMat.dispose();
     };
   }, [prefersReducedMotion, theme]);
 
