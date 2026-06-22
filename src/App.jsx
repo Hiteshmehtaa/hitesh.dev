@@ -5,7 +5,7 @@ const projectsData = {
   hiresia: {
     title: 'Hiresia',
     tag: 'FULL STACK ATS',
-    image: 'https://placehold.co/800x400/2a2d35/ffffff?text=Hiresia+Dashboard',
+    image: '/hiresia_dashboard.png',
     bullets: [
       'Built a MERN-based Applicant Tracking System (ATS) with job postings, candidate tracking, interview scheduling, and analytics features.',
       'Designed an analytics dashboard surfacing real-time hiring metrics and funnel insights.',
@@ -18,7 +18,7 @@ const projectsData = {
   rapidrescue: {
     title: 'RapidRescueQ',
     tag: 'COORDINATION PLATFORM',
-    image: 'https://placehold.co/800x400/1A1A1A/8FAF8C?text=RapidRescueQ',
+    image: '/rapid_rescue_ui.png',
     bullets: [
       'Independently designed and built a MERN-stack platform connecting public reporters, NGOs, volunteers, and adopters.',
       'Implemented live camera-based emergency reporting with photo evidence and location capture.',
@@ -51,7 +51,7 @@ function App() {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
-  // Three.js Background - Flowing Digital Terrain
+  // Three.js Background - Scroll Journey
   useEffect(() => {
     if (prefersReducedMotion || !canvasContainerRef.current) return;
 
@@ -62,47 +62,99 @@ function App() {
 
     const scene = new THREE.Scene();
     const fogColor = theme === 'dark' ? 0x0B0C10 : 0xF5F3EF;
-    scene.fog = new THREE.FogExp2(fogColor, 0.06);
+    scene.fog = new THREE.FogExp2(fogColor, 0.02);
 
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 3, 12);
-    camera.lookAt(0, 0, 0);
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 5);
 
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(renderer.domElement);
 
-    const geometry = new THREE.PlaneGeometry(60, 40, 60, 40);
-    geometry.rotateX(-Math.PI / 2);
+    // Dynamic Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+    scene.add(ambientLight);
+    
+    const colorLight = new THREE.PointLight(theme === 'dark' ? 0x66FCF1 : 0x8FAF8C, 50, 100);
+    scene.add(colorLight);
 
-    const positionAttribute = geometry.getAttribute('position');
-    const vertexData = [];
-    for (let i = 0; i < positionAttribute.count; i++) {
-      vertexData.push({
-        x: positionAttribute.getX(i),
-        y: positionAttribute.getY(i),
-        z: positionAttribute.getZ(i),
+    // Create the "Tunnel" Environment
+    const objectsGroup = new THREE.Group();
+    scene.add(objectsGroup);
+
+    const geoTypes = [
+      new THREE.IcosahedronGeometry(1, 0),
+      new THREE.OctahedronGeometry(1, 0),
+      new THREE.TetrahedronGeometry(1, 0)
+    ];
+
+    const materials = [
+      new THREE.MeshPhysicalMaterial({ color: 0x8FAF8C, metalness: 0.2, roughness: 0.1, transmission: 0.9, thickness: 1 }),
+      new THREE.MeshPhysicalMaterial({ color: theme === 'dark' ? 0x66FCF1 : 0x1A1A1A, metalness: 0.5, roughness: 0.2, clearcoat: 1 }),
+      new THREE.MeshBasicMaterial({ color: theme === 'dark' ? 0x1F2833 : 0xE0DDD6, wireframe: true })
+    ];
+
+    const meshes = [];
+    const objectCount = 150;
+    
+    for (let i = 0; i < objectCount; i++) {
+      const geo = geoTypes[Math.floor(Math.random() * geoTypes.length)];
+      const mat = materials[Math.floor(Math.random() * materials.length)];
+      const mesh = new THREE.Mesh(geo, mat);
+      
+      // Distribute along Z-axis (0 to -200)
+      mesh.position.x = (Math.random() - 0.5) * 40;
+      mesh.position.y = (Math.random() - 0.5) * 40;
+      mesh.position.z = -Math.random() * 200;
+      
+      mesh.rotation.x = Math.random() * Math.PI;
+      mesh.rotation.y = Math.random() * Math.PI;
+      
+      // Keep clear center path
+      if (Math.abs(mesh.position.x) < 3 && Math.abs(mesh.position.y) < 3) {
+        mesh.position.x += 4 * Math.sign(mesh.position.x || 1);
+      }
+
+      meshes.push({
+        mesh,
+        rx: (Math.random() - 0.5) * 0.02,
+        ry: (Math.random() - 0.5) * 0.02
       });
+      objectsGroup.add(mesh);
     }
 
-    const wireframeColor = theme === 'dark' ? 0x66FCF1 : 0x8FAF8C;
-    const material = new THREE.LineBasicMaterial({
-      color: wireframeColor,
+    // Particles
+    const particlesGeo = new THREE.BufferGeometry();
+    const particleCountNum = 1500;
+    const posArray = new Float32Array(particleCountNum * 3);
+    for(let i = 0; i < particleCountNum * 3; i++) {
+      posArray[i * 3] = (Math.random() - 0.5) * 60;
+      posArray[i * 3 + 1] = (Math.random() - 0.5) * 60;
+      posArray[i * 3 + 2] = -Math.random() * 200 + 10;
+    }
+    particlesGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+    const particlesMat = new THREE.PointsMaterial({
+      size: 0.05,
+      color: theme === 'dark' ? 0x66FCF1 : 0x8FAF8C,
       transparent: true,
-      opacity: theme === 'dark' ? 0.3 : 0.6
+      opacity: 0.6
     });
-
-    const mesh = new THREE.LineSegments(new THREE.WireframeGeometry(geometry), material);
-    mesh.position.y = -3;
-    scene.add(mesh);
+    const particles = new THREE.Points(particlesGeo, particlesMat);
+    scene.add(particles);
 
     let mouseX = 0; let mouseY = 0;
     const onMouseMove = (event) => {
-      mouseX = (event.clientX - window.innerWidth / 2) * 0.001;
-      mouseY = (event.clientY - window.innerHeight / 2) * 0.001;
+      mouseX = (event.clientX - window.innerWidth / 2) * 0.002;
+      mouseY = (event.clientY - window.innerHeight / 2) * 0.002;
     };
     window.addEventListener('mousemove', onMouseMove);
+
+    let scrollY = window.scrollY;
+    const onScroll = () => {
+      scrollY = window.scrollY;
+    };
+    window.addEventListener('scroll', onScroll);
 
     let reqId;
     let time = 0;
@@ -110,17 +162,30 @@ function App() {
       reqId = requestAnimationFrame(animate);
       time += 0.01;
 
-      for (let i = 0; i < positionAttribute.count; i++) {
-        const data = vertexData[i];
-        const y = Math.sin(data.x * 0.4 + time) * 0.8 + 
-                  Math.sin(data.z * 0.4 + time * 1.2) * 0.8;
-        positionAttribute.setY(i, y);
-      }
-      positionAttribute.needsUpdate = true;
+      // Rotate objects
+      meshes.forEach(m => {
+        m.mesh.rotation.x += m.rx;
+        m.mesh.rotation.y += m.ry;
+      });
 
-      camera.position.x += (mouseX * 4 - camera.position.x) * 0.05;
-      camera.position.y += (3 - mouseY * 2 - camera.position.y) * 0.05;
-      camera.lookAt(0, -2, 0);
+      // Move camera based on scroll
+      const documentHeight = document.documentElement.scrollHeight - window.innerHeight;
+      const scrollPercent = documentHeight > 0 ? scrollY / documentHeight : 0;
+      
+      const targetZ = 5 - (scrollPercent * 180); // Travel from z=5 to z=-175
+      
+      camera.position.z += (targetZ - camera.position.z) * 0.1; // Lerp
+      
+      // Parallax mouse effect
+      camera.position.x += (mouseX * 5 - camera.position.x) * 0.05;
+      camera.position.y += (-mouseY * 5 - camera.position.y) * 0.05;
+      
+      // Slow rotation of camera based on scroll and mouse
+      camera.rotation.z = mouseX * 0.2 + Math.sin(time * 0.5) * 0.05;
+
+      colorLight.position.z = camera.position.z - 20;
+      colorLight.position.x = Math.sin(time) * 10;
+      colorLight.position.y = Math.cos(time) * 10;
 
       renderer.render(scene, camera);
     }
@@ -136,19 +201,21 @@ function App() {
     setTimeout(() => {
       if (container) {
         container.style.opacity = '1';
-        container.style.transform = 'scale(1)';
       }
     }, 100);
 
     return () => {
       window.removeEventListener('resize', onResize);
       window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('scroll', onScroll);
       cancelAnimationFrame(reqId);
       if (container && renderer.domElement) {
         container.removeChild(renderer.domElement);
       }
-      geometry.dispose();
-      material.dispose();
+      geoTypes.forEach(g => g.dispose());
+      materials.forEach(m => m.dispose());
+      particlesGeo.dispose();
+      particlesMat.dispose();
     };
   }, [prefersReducedMotion, theme]);
 
@@ -305,8 +372,8 @@ function App() {
       </nav>
 
       <main>
+        <div id="canvas-container" ref={canvasContainerRef}></div>
         <section id="hero" className="hero-modern">
-          <div id="canvas-container" ref={canvasContainerRef}></div>
           <div className="container hero-content reveal">
             <div className="hero-badge">Available for opportunities</div>
             <h1 className="hero-title">
@@ -441,7 +508,7 @@ function App() {
         <section id="contact" className="reveal">
           <div className="container">
             <h2 className="contact-title">Let's Build Something</h2>
-            <InteractiveEl as="a" href="mailto:hitesh059@gmail.com" className="contact-email">hitesh059@gmail.com</InteractiveEl>
+            <InteractiveEl as="a" href="mailto:mhitesh059@gmail.com" className="contact-email">mhitesh059@gmail.com</InteractiveEl>
             
             <div className="socials">
               <InteractiveEl as="a" href="https://github.com/Hiteshmehtaa" target="_blank" rel="noreferrer" className="social-link" aria-label="GitHub">

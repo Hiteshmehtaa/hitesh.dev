@@ -227,7 +227,7 @@ nav.scrolled::before {
   height: 100vh;
   min-height: 700px;
   overflow: hidden;
-  background-color: var(--bg-color);
+  background-color: transparent; /* Changed from var(--bg-color) to let canvas show */
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -235,16 +235,15 @@ nav.scrolled::before {
 }
 
 #canvas-container {
-  position: absolute;
+  position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  z-index: 1; /* Below text */
+  z-index: -1; /* Deep background */
   pointer-events: none;
   opacity: 0;
-  transform: scale(0.95);
-  transition: opacity 2s ease, transform 2s ease;
+  transition: opacity 2s ease;
 }
 
 .hero-content {
@@ -252,6 +251,7 @@ nav.scrolled::before {
   z-index: 10;
   width: 100%;
   padding-top: 80px;
+  pointer-events: none; /* LET CLICKS PASS TO 3D */
 }
 .hero-badge {
   display: inline-block;
@@ -265,6 +265,7 @@ nav.scrolled::before {
   margin-bottom: 24px;
   background: var(--card-bg);
   backdrop-filter: blur(8px);
+  pointer-events: auto;
 }
 .hero-title {
   font-family: var(--font-heading);
@@ -273,6 +274,7 @@ nav.scrolled::before {
   color: var(--text-heading);
   margin-bottom: 24px;
   font-weight: 400;
+  pointer-events: none;
 }
 .hero-title .highlight {
   color: var(--accent);
@@ -284,10 +286,12 @@ nav.scrolled::before {
   max-width: 600px;
   line-height: 1.6;
   margin-bottom: 48px;
+  pointer-events: none;
 }
 .hero-cta {
   display: flex;
   gap: 16px;
+  pointer-events: auto;
 }
 .btn-primary {
   padding: 16px 32px;
@@ -298,6 +302,7 @@ nav.scrolled::before {
   font-size: 14px;
   font-weight: 500;
   transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: auto;
 }
 .btn-primary:hover {
   opacity: 0.9;
@@ -313,6 +318,7 @@ nav.scrolled::before {
   font-weight: 500;
   border: 1px solid var(--text-heading);
   transition: background 0.3s ease, color 0.3s ease;
+  pointer-events: auto;
 }
 .btn-secondary:hover {
   background: var(--text-heading);
@@ -322,6 +328,7 @@ nav.scrolled::before {
 /* SECTION 3 — ABOUT */
 #about {
   padding: 120px 0;
+  background-color: transparent;
 }
 
 .about-grid {
@@ -385,7 +392,7 @@ nav.scrolled::before {
 /* SECTION 4 — EXPERIENCE */
 #experience {
   position: relative;
-  background: var(--bg-experience);
+  background-color: transparent;
   padding: 120px 0;
   transition: background-color 0.5s ease;
 }
@@ -521,6 +528,7 @@ nav.scrolled::before {
 /* SECTION 5 — PROJECTS & MODALS */
 #work {
   padding: 120px 0;
+  background-color: transparent;
 }
 
 .projects-grid {
@@ -651,7 +659,7 @@ nav.scrolled::before {
 /* TESTIMONIALS */
 #testimonials {
   padding: 120px 0;
-  background: var(--bg-experience);
+  background-color: transparent;
   transition: background-color 0.5s ease;
 }
 .testimonial-grid {
@@ -682,7 +690,7 @@ nav.scrolled::before {
 
 /* SECTION 6 — STACK */
 #stack {
-  background: var(--bg-color);
+  background-color: transparent;
   padding: 60px 0;
   overflow: hidden;
   transition: background-color 0.5s ease;
