@@ -4,7 +4,7 @@ import * as CANNON from 'cannon-es';
 
 const projectsData = {
   hiresia: {
-    title: 'Hiresia',
+    title: 'Hirevia',
     tag: 'FULL STACK ATS',
     image: '/hiresia_dashboard.png',
     bullets: [
@@ -30,6 +30,100 @@ const projectsData = {
   }
 };
 
+function ContactForm({ theme }) {
+  const [submitted, setSubmitted] = useState(false);
+  const [formData, setFormData] = useState({ name: '', email: '', message: '' });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (formData.name && formData.email && formData.message) {
+      setSubmitted(true);
+    }
+  };
+
+  if (submitted) {
+    return (
+      <div style={{
+        padding: '20px',
+        background: theme === 'dark' ? 'rgba(76, 175, 80, 0.1)' : 'rgba(76, 175, 80, 0.05)',
+        border: '1px solid #4CAF50',
+        borderRadius: '8px',
+        color: '#4CAF50',
+        textAlign: 'center',
+        margin: '16px 0',
+        animation: 'fadeIn 0.4s ease-out'
+      }}>
+        <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" strokeWidth="2.5" fill="none" style={{ marginBottom: '8px', display: 'inline-block' }}>
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+        <div style={{ fontWeight: 'bold', fontSize: '16px', marginBottom: '4px' }}>Message Sent!</div>
+        <div style={{ fontSize: '13px', opacity: 0.85 }}>Thank you! I will get back to you shortly.</div>
+      </div>
+    );
+  }
+
+  const inputStyle = {
+    width: '100%',
+    padding: '10px 14px',
+    borderRadius: '6px',
+    border: theme === 'dark' ? '1px solid rgba(255,255,255,0.15)' : '1px solid rgba(0,0,0,0.15)',
+    background: theme === 'dark' ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+    color: theme === 'dark' ? '#fff' : '#000',
+    fontSize: '13px',
+    marginBottom: '12px',
+    outline: 'none',
+    boxSizing: 'border-box',
+    fontFamily: 'inherit',
+    transition: 'border-color 0.2s'
+  };
+
+  return (
+    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '12px' }}>
+      <input
+        type="text"
+        placeholder="Your Name"
+        required
+        value={formData.name}
+        onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
+        style={inputStyle}
+      />
+      <input
+        type="email"
+        placeholder="Your Email"
+        required
+        value={formData.email}
+        onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
+        style={inputStyle}
+      />
+      <textarea
+        placeholder="Your Message..."
+        rows="4"
+        required
+        value={formData.message}
+        onChange={e => setFormData(prev => ({ ...prev, message: e.target.value }))}
+        style={{ ...inputStyle, resize: 'none' }}
+      />
+      <button
+        type="submit"
+        style={{
+          padding: '12px',
+          background: '#ff6b6b',
+          color: '#fff',
+          border: 'none',
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontWeight: 'bold',
+          fontSize: '13px',
+          transition: 'background 0.2s, transform 0.1s'
+        }}
+      >
+        Send Message
+      </button>
+    </form>
+  );
+}
+
 function App() {
   const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   
@@ -52,6 +146,11 @@ function App() {
 
   const toggleTheme = () => {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
+  };
+
+  const handleNavClick = (e, zoneId) => {
+    e.preventDefault();
+    window.dispatchEvent(new CustomEvent('drive-to-zone', { detail: zoneId }));
   };
 
 
@@ -225,23 +324,53 @@ function App() {
     addRamp(-5, -10, 0);
     addRamp(20, -15, Math.PI/2);
 
-    for(let i=0; i<15; i++) {
-       addTree((Math.random() - 0.5) * 80, (Math.random() - 0.5) * 80);
+    // Zone positions — used to avoid placing trees too close
+    const zonePositions = [
+      { x: -20, z: -25 },
+      { x: 22, z: -38 },
+      { x: -35, z: -55 },
+      { x: 8, z: -70 },
+      { x: 40, z: -88 },
+      { x: 0, z: -108 }
+    ];
+
+    for(let i=0; i<25; i++) {
+       let tx, tz;
+       let ok = false;
+       while(!ok) {
+         tx = (Math.random() - 0.5) * 110;
+         tz = (Math.random() - 0.5) * 110;
+         
+         // Don't place near start (0, 5)
+         const distToStart = Math.sqrt(tx*tx + (tz-5)*(tz-5));
+         if (distToStart < 8) continue;
+
+         // Check distance to all zones
+         let tooClose = false;
+         for (let j = 0; j < zonePositions.length; j++) {
+           const z = zonePositions[j];
+           const dist = Math.sqrt((tx-z.x)*(tx-z.x) + (tz-z.z)*(tz-z.z));
+           if (dist < 8) {
+             tooClose = true;
+             break;
+           }
+         }
+         if (!tooClose) ok = true;
+       }
+       addTree(tx, tz);
     }
 
     // Set up pins
     [[-10,-20], [-10.5,-20.5], [-9.5,-20.5], [-11,-21], [-10,-21], [-9,-21]].forEach(pos => addPin(pos[0], pos[1]));
 
-    // ── DISCOVERY ZONES ──────────────────────────────────────────────────────
-    
-    // Zone Monuments
+    // Zone monuments — positioned near their respective zone pads
     const monMat1 = new THREE.MeshStandardMaterial({ color: 0xFF6B6B, roughness: 0.2, metalness: 0.8 });
     const monMat2 = new THREE.MeshStandardMaterial({ color: 0x4CAF50, roughness: 0.2, metalness: 0.8 });
     const monMat3 = new THREE.MeshStandardMaterial({ color: 0x66FCF1, roughness: 0.2, metalness: 0.8 });
 
     const hMon = new THREE.Group();
     [0, 1.2, 2.4].forEach(y => { const srv = new THREE.Mesh(new THREE.BoxGeometry(3, 1, 3), monMat1); srv.position.y = y; srv.castShadow = true; hMon.add(srv); });
-    hMon.position.set(-16, 0.5, -15);
+    hMon.position.set(-20, 0.5, -25);
     hMon.scale.set(0.001, 0.001, 0.001);
     scene.add(hMon);
 
@@ -250,26 +379,50 @@ function App() {
     const dish = new THREE.Mesh(new THREE.SphereGeometry(1.5, 16, 16, 0, Math.PI), monMat2);
     dish.position.y = 1.5; dish.rotation.x = -Math.PI/4;
     rMon.add(base); rMon.add(dish);
-    rMon.position.set(19, 0.5, -20);
+    rMon.position.set(22, 0.5, -38);
     rMon.scale.set(0.001, 0.001, 0.001);
     scene.add(rMon);
 
+    const aboutMon = new THREE.Mesh(new THREE.OctahedronGeometry(1.8, 0), monMat1);
+    aboutMon.position.set(-35, 2.0, -55);
+    aboutMon.castShadow = true;
+    aboutMon.scale.set(0.001, 0.001, 0.001);
+    scene.add(aboutMon);
+
     const eMon = new THREE.Mesh(new THREE.BoxGeometry(4, 10, 4), monMat3);
-    eMon.position.set(0, 5, -40);
+    eMon.position.set(8, 5, -70);
     eMon.castShadow = true;
     eMon.scale.set(0.001, 0.001, 0.001);
     scene.add(eMon);
 
+    const stackMon = new THREE.Group();
+    [0, 1.0, 2.0].forEach(y => {
+      const layer = new THREE.Mesh(new THREE.CylinderGeometry(1.8 - y*0.3, 1.8 - y*0.3, 0.8, 8), monMat2);
+      layer.position.y = y;
+      layer.rotation.y = y * Math.PI / 4;
+      layer.castShadow = true;
+      stackMon.add(layer);
+    });
+    stackMon.position.set(40, 0.5, -88);
+    stackMon.scale.set(0.001, 0.001, 0.001);
+    scene.add(stackMon);
+
+    const contactMon = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.3, 16, 32), monMat3);
+    contactMon.position.set(0, 2.0, -108);
+    contactMon.castShadow = true;
+    contactMon.scale.set(0.001, 0.001, 0.001);
+    scene.add(contactMon);
+
     const zones = [];
     const createZone = (id, x, z, color, monument) => {
-      const padGeo = new THREE.CylinderGeometry(3.0, 3.0, 0.1, 32);
+      const padGeo = new THREE.CylinderGeometry(3.5, 3.5, 0.1, 32);
       const padMat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6 });
       const pad = new THREE.Mesh(padGeo, padMat);
       pad.position.set(x, 0.05, z);
       pad.receiveShadow = true;
       scene.add(pad);
       
-      const ringGeo = new THREE.TorusGeometry(2.5, 0.08, 16, 48);
+      const ringGeo = new THREE.TorusGeometry(3.0, 0.08, 16, 48);
       const ringMat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.8 });
       const ring = new THREE.Mesh(ringGeo, ringMat);
       ring.position.set(x, 1.5, z);
@@ -280,27 +433,68 @@ function App() {
       zones.push({ id, position: new THREE.Vector3(x, 0, z), ring, monument });
     };
 
-    createZone('hiresia', -12, -15, 0x4dabf7, hMon);
-    createZone('rapidrescue', 15, -20, 0x38d9a9, rMon);
-    createZone('experience', 0, -35, 0xffd43b, eMon);
+    // Zones — spread well apart so player needs to actually explore
+    createZone('hiresia',    -20, -25,  0x4dabf7, hMon);
+    createZone('rapidrescue', 22, -38,  0x38d9a9, rMon);
+    createZone('about',      -35, -55,  0xbe4bdb, aboutMon);
+    createZone('experience',   8, -70,  0xffd43b, eMon);
+    createZone('stack',       40, -88,  0xff922b, stackMon);
+    createZone('contact',      0, -108, 0xff6b6b, contactMon);
 
-    // ── TOY BUGGY PHYSICS (SPHERE CONTROLLER) ────────────────────────────────
-    const sphereRadius = 0.6;
-    const sphereMat = new CANNON.Material('sphere');
-    world.addContactMaterial(new CANNON.ContactMaterial(sphereMat, groundMat, {
-      friction: 0.1,
-      restitution: 0.1
-    }));
-
+    // ── TOY BUGGY PHYSICS (CANNON.RAYCASTVEHICLE) ───────────────────────────
+    const chassisShape = new CANNON.Box(new CANNON.Vec3(0.6, 0.25, 1.2)); // width/2, height/2, length/2
     const chassisBody = new CANNON.Body({
-      mass: 25,
-      shape: new CANNON.Sphere(sphereRadius),
-      material: sphereMat,
+      mass: 120,
+      material: carMat,
       linearDamping: 0.1,
-      angularDamping: 0.99
+      angularDamping: 0.6
     });
-    chassisBody.position.set(0, 2, 5); // Start higher to fall safely
-    world.addBody(chassisBody);
+    chassisBody.addShape(chassisShape);
+    chassisBody.position.set(0, 1.5, 5); // Start position
+    // NOTE: Do NOT call world.addBody(chassisBody) here — vehicle.addToWorld() does this
+
+    const vehicle = new CANNON.RaycastVehicle({
+      chassisBody: chassisBody,
+      indexRightAxis: 0,
+      indexUpAxis: 1,
+      indexForwardAxis: 2
+    });
+
+    const wheelOptions = {
+      radius: 0.35,
+      directionLocal: new CANNON.Vec3(0, -1, 0),
+      suspensionStiffness: 25,
+      suspensionRestLength: 0.4,
+      maxSuspensionForce: 100000,
+      maxSuspensionTravel: 0.35,
+      dampingRelaxation: 2.3,
+      dampingCompression: 4.4,
+      frictionSlip: 1.4,
+      axleLocal: new CANNON.Vec3(-1, 0, 0),
+      customSlidingRotationalSpeed: -30,
+      useCustomSlidingRotationalSpeed: true,
+      rollInfluence: 0.05
+    };
+
+    // Add 4 wheels — connection points relative to chassis center
+    vehicle.addWheel({
+      ...wheelOptions,
+      chassisConnectionPointLocal: new CANNON.Vec3(-0.7, -0.15, -0.85) // FL
+    });
+    vehicle.addWheel({
+      ...wheelOptions,
+      chassisConnectionPointLocal: new CANNON.Vec3(0.7, -0.15, -0.85)  // FR
+    });
+    vehicle.addWheel({
+      ...wheelOptions,
+      chassisConnectionPointLocal: new CANNON.Vec3(-0.7, -0.15, 0.85)  // RL
+    });
+    vehicle.addWheel({
+      ...wheelOptions,
+      chassisConnectionPointLocal: new CANNON.Vec3(0.7, -0.15, 0.85)   // RR
+    });
+
+    vehicle.addToWorld(world); // This also adds chassisBody to world
 
     // ── TOY BUGGY VISUALS ────────────────────────────────────────────────────
     const carGroup = new THREE.Group();
@@ -343,16 +537,14 @@ function App() {
     // Wheels
     const wheelGroups = [];
     const wheelOffsets = [
-      [-0.75, -0.25, -0.9], // Front Left
-      [0.75, -0.25, -0.9],  // Front Right
-      [-0.75, -0.25, 0.9],  // Rear Left
-      [0.75, -0.25, 0.9]   // Rear Right
+      [-0.75, -0.25, -0.9], // FL
+      [0.75, -0.25, -0.9],  // FR
+      [-0.75, -0.25, 0.9],  // RL
+      [0.75, -0.25, 0.9]   // RR
     ];
 
     wheelOffsets.forEach(([x, y, z]) => {
       const wg = new THREE.Group();
-      wg.position.set(x, y, z);
-      
       const wheelSpinGroup = new THREE.Group();
       wg.add(wheelSpinGroup);
 
@@ -368,28 +560,41 @@ function App() {
       hub.rotation.z = Math.PI / 2;
       wheelSpinGroup.add(hub);
 
-      carGroup.add(wg);
+      scene.add(wg); // Added directly to scene to prevent double translation
       wheelGroups.push({ group: wg, spinGroup: wheelSpinGroup, isFront: z < 0 });
     });
 
     // ── CONTROLS ────────────────────────────────────────────────────────────
     const keys = {};
+    let autopilotTarget = null;
+
     const onKey = e => { 
+      // Avoid controlling the car when typing in input fields
+      if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') {
+        return;
+      }
       if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
         if(e.target === document.body) e.preventDefault();
       }
       keys[e.code] = e.type === 'keydown'; 
+      
+      // Manual input cancels any autopilot target or test autopilot
+      if (e.type === 'keydown' && ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
+        autopilotTarget = null;
+        testAutoDrive = false;
+      }
     };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKey);
 
-    let carYaw = 0;
-    const visualNormal = new THREE.Vector3(0, 1, 0);
     const camTarget = new THREE.Vector3();
 
     // Autopilot for testing/demo (press T to toggle)
     let testAutoDrive = false;
     window.addEventListener('keydown', e => {
+      if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') {
+        return;
+      }
       if (e.code === 'KeyT') {
         testAutoDrive = !testAutoDrive;
         if (!testAutoDrive) {
@@ -403,6 +608,21 @@ function App() {
       }
     });
 
+    const onDriveTo = (e) => {
+      const zoneId = e.detail;
+      if (zoneId === 'reset') {
+        autopilotTarget = new THREE.Vector3(0, 0, 5);
+        testAutoDrive = false;
+        return;
+      }
+      const targetZone = zones.find(z => z.id === zoneId);
+      if (targetZone) {
+        autopilotTarget = targetZone.position;
+        testAutoDrive = false;
+      }
+    };
+    window.addEventListener('drive-to-zone', onDriveTo);
+
     // Intersection Observer
     let isVisible = true;
     const observer = new IntersectionObserver((entries) => {
@@ -413,192 +633,150 @@ function App() {
     // ── ANIMATION LOOP ───────────────────────────────────────────────────────
     let reqId;
     const clock = new THREE.Clock();
-    const fixedStep = 1 / 60;
-    let accumulated = 0;
 
     function animate() {
       reqId = requestAnimationFrame(animate);
       if (!isVisible) return;
+      
       const delta = Math.min(clock.getDelta(), 0.1);
-      accumulated += delta;
+      const dt = delta;
 
-      if (testAutoDrive) {
-        // Target: Experience zone at (0, -35)
+      const hasManualInput = (
+        keys['KeyW'] || keys['KeyS'] || keys['KeyA'] || keys['KeyD'] ||
+        keys['ArrowUp'] || keys['ArrowDown'] || keys['ArrowLeft'] || keys['ArrowRight'] ||
+        keys['Space']
+      );
+
+      if (hasManualInput) {
+        autopilotTarget = null;
+        testAutoDrive = false;
+      }
+
+      // Physics Reset / Flip-recovery (Press R)
+      if (keys['KeyR']) {
+        chassisBody.position.y = Math.max(chassisBody.position.y, 0) + 2.5;
+        chassisBody.velocity.set(0, 0, 0);
+        chassisBody.angularVelocity.set(0, 0, 0);
+        // Extract current yaw from chassis quaternion and reset to upright
+        const fwd = new THREE.Vector3(0, 0, -1);
+        fwd.applyQuaternion(new THREE.Quaternion(
+          chassisBody.quaternion.x, chassisBody.quaternion.y,
+          chassisBody.quaternion.z, chassisBody.quaternion.w
+        ));
+        const headingAngle = Math.atan2(fwd.x, fwd.z);
+        chassisBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0,1,0), headingAngle);
+        keys['KeyR'] = false;
+      }
+
+      const maxSteerVal = 0.5;
+      const maxForce = 240; // Slightly faster than before
+      const brakeForce = 40;
+
+      let steerValue = 0;
+      let engineForce = 0;
+      let currentBrake = 0;
+
+      if (autopilotTarget) {
+        const dx = autopilotTarget.x - chassisBody.position.x;
+        const dz = autopilotTarget.z - chassisBody.position.z;
+        const dist = Math.sqrt(dx*dx + dz*dz);
+        if (dist > 3.5) {
+          const targetAngle = Math.atan2(-dx, -dz);
+          const chassisQ = new THREE.Quaternion(
+            chassisBody.quaternion.x, chassisBody.quaternion.y,
+            chassisBody.quaternion.z, chassisBody.quaternion.w
+          );
+          const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(chassisQ);
+          const currentAngle = Math.atan2(forward.x, forward.z);
+          let angleDiff = targetAngle - currentAngle;
+          angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
+
+          steerValue = Math.max(-maxSteerVal, Math.min(maxSteerVal, -angleDiff * 1.8));
+          engineForce = -maxForce * 0.7;
+          currentBrake = 0;
+        } else {
+          engineForce = 0;
+          currentBrake = brakeForce;
+          autopilotTarget = null;
+          // Clear active keys
+          keys['KeyW'] = false;
+          keys['KeyS'] = false;
+          keys['Space'] = false;
+          keys['ArrowUp'] = false;
+          keys['ArrowDown'] = false;
+        }
+      } else if (testAutoDrive) {
         const dx = 0 - chassisBody.position.x;
         const dz = -35 - chassisBody.position.z;
         const dist = Math.sqrt(dx*dx + dz*dz);
-        if (dist > 3.0) {
-          keys['KeyW'] = true;
-          keys['Space'] = false;
+        if (dist > 3.5) {
+          const targetAngle = Math.atan2(-dx, -dz);
+          const chassisQ2 = new THREE.Quaternion(
+            chassisBody.quaternion.x, chassisBody.quaternion.y,
+            chassisBody.quaternion.z, chassisBody.quaternion.w
+          );
+          const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(chassisQ2);
+          const currentAngle = Math.atan2(forward.x, forward.z);
+          let angleDiff = targetAngle - currentAngle;
+          angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
+
+          steerValue = Math.max(-maxSteerVal, Math.min(maxSteerVal, -angleDiff * 1.8));
+          engineForce = -maxForce * 0.7;
+          currentBrake = 0;
         } else {
-          keys['KeyW'] = false;
-          keys['Space'] = true;
+          engineForce = 0;
+          currentBrake = brakeForce;
         }
+      } else {
+        // Manual steering — positive steer value = RIGHT, negative = LEFT
+        if (keys['ArrowLeft'] || keys['KeyA']) steerValue = -maxSteerVal;
+        else if (keys['ArrowRight'] || keys['KeyD']) steerValue = maxSteerVal;
+
+        // Manual engine force
+        if (keys['ArrowUp'] || keys['KeyW']) engineForce = -maxForce;
+        else if (keys['ArrowDown'] || keys['KeyS']) engineForce = maxForce;
+
+        if (keys['Space']) currentBrake = brakeForce;
       }
 
-      const velocity = chassisBody.velocity;
-
-      while (accumulated >= fixedStep) {
-        // Ground checking
-        let isOnGround = false;
-        const groundNormal = new CANNON.Vec3(0, 1, 0);
-
-        for (let i = 0; i < world.contacts.length; i++) {
-          const contact = world.contacts[i];
-          if (contact.bi === chassisBody || contact.bj === chassisBody) {
-            const normal = contact.bi === chassisBody ? contact.ni.negate() : contact.ni;
-            if (normal.y > 0.5) {
-              groundNormal.copy(normal);
-              isOnGround = true;
-            }
-          }
-        }
-
-        // Steer inputs change carYaw
-        let steerInput = 0;
-        if (keys['ArrowLeft'] || keys['KeyA']) steerInput = 1;
-        else if (keys['ArrowRight'] || keys['KeyD']) steerInput = -1;
-
-        // Steering rotation scale with velocity (so we don't turn instantly when completely stopped, but still can wiggle)
-        const speed = chassisBody.velocity.length();
-        const steerScale = speed < 1.0 ? 0.5 + 0.5 * speed : 1.0;
-        const STEER_SPEED = 3.5;
-        carYaw += steerInput * STEER_SPEED * steerScale * fixedStep;
-
-        // Calculate forward direction on horizontal plane
-        const forwardX = -Math.sin(carYaw);
-        const forwardZ = -Math.cos(carYaw);
-
-        // Project onto ground normal to get sloped forward vector
-        let fwdX = forwardX;
-        let fwdY = 0;
-        let fwdZ = forwardZ;
-
-        if (isOnGround) {
-          const dot = forwardX * groundNormal.x + forwardZ * groundNormal.z;
-          fwdX = forwardX - groundNormal.x * dot;
-          fwdY = -groundNormal.y * dot;
-          fwdZ = forwardZ - groundNormal.z * dot;
-          
-          const len = Math.sqrt(fwdX*fwdX + fwdY*fwdY + fwdZ*fwdZ);
-          if (len > 0.0001) {
-            fwdX /= len;
-            fwdY /= len;
-            fwdZ /= len;
-          }
-        }
-
-        // Right vector (horizontal perpendicular)
-        const rightX = -forwardZ;
-        const rightZ = forwardX;
-
-        // Current speed in sloped forward direction
-        const currentSpeed = chassisBody.velocity.x * fwdX + chassisBody.velocity.y * fwdY + chassisBody.velocity.z * fwdZ;
-
-        // Acceleration and braking
-        let targetSpeed = 0;
-        let accelRate = 0;
-
-        const MAX_SPEED = 22.0;       // Max forward speed
-        const MAX_REVERSE = 10.0;     // Max reverse speed
-        const ACCEL = 40.0;           // Snappy acceleration
-        const DECEL = 15.0;           // Smooth rolling resistance
-        const BRAKE = 60.0;           // Hard brakes
-
-        if (keys['ArrowUp'] || keys['KeyW']) {
-          targetSpeed = MAX_SPEED;
-          accelRate = ACCEL;
-        } else if (keys['ArrowDown'] || keys['KeyS']) {
-          targetSpeed = -MAX_REVERSE;
-          accelRate = ACCEL;
-        } else {
-          targetSpeed = 0;
-          accelRate = DECEL;
-        }
-
-        if (keys['Space']) {
-          targetSpeed = 0;
-          accelRate = BRAKE;
-        }
-
-        // Interpolate forward speed
-        const speedDiff = targetSpeed - currentSpeed;
-        const newSpeed = currentSpeed + speedDiff * accelRate * fixedStep;
-
-        // Apply new speed along sloped forward direction
-        chassisBody.velocity.x = fwdX * newSpeed;
-        if (isOnGround) {
-          chassisBody.velocity.y = fwdY * newSpeed;
-        }
-        chassisBody.velocity.z = fwdZ * newSpeed;
-
-        // Damp lateral velocity (grip)
-        const lateralSpeed = chassisBody.velocity.x * rightX + chassisBody.velocity.z * rightZ;
-        const GRIP = 0.93; // 93% lateral velocity damped per step
-        chassisBody.velocity.x -= rightX * lateralSpeed * GRIP;
-        chassisBody.velocity.z -= rightZ * lateralSpeed * GRIP;
-
-        world.fixedStep(fixedStep);
-        accumulated -= fixedStep;
+      // Apply controls
+      vehicle.setSteeringValue(steerValue, 0);
+      vehicle.setSteeringValue(steerValue, 1);
+      vehicle.applyEngineForce(engineForce, 2);
+      vehicle.applyEngineForce(engineForce, 3);
+      for (let i = 0; i < 4; i++) {
+        vehicle.setBrake(currentBrake, i);
       }
 
-      // Find ground normal for visuals
-      let isOnGround = false;
-      const groundNormal = new CANNON.Vec3(0, 1, 0);
-      for (let i = 0; i < world.contacts.length; i++) {
-        const contact = world.contacts[i];
-        if (contact.bi === chassisBody || contact.bj === chassisBody) {
-          const normal = contact.bi === chassisBody ? contact.ni.negate() : contact.ni;
-          if (normal.y > 0.5) {
-            groundNormal.copy(normal);
-            isOnGround = true;
-          }
-        }
+      // Step physics world — RaycastVehicle runs inside world.step() automatically
+      world.step(dt);
+
+      // Sync visual chassis — explicitly copy CANNON quaternion xyzw to THREE
+      carGroup.position.set(
+        chassisBody.position.x,
+        chassisBody.position.y,
+        chassisBody.position.z
+      );
+      carGroup.quaternion.set(
+        chassisBody.quaternion.x,
+        chassisBody.quaternion.y,
+        chassisBody.quaternion.z,
+        chassisBody.quaternion.w
+      );
+
+      // ── WHEEL VISUAL SYNC ────────────────────────────────────────────
+      // The tire mesh already has rotation.z = PI/2 locally (cylinder axis = X, disc faces ±X).
+      // The physics wheel quaternion encodes correct rolling + steering around the X axle.
+      // Just copy the quaternion directly — NO extra offset needed.
+      for (let i = 0; i < vehicle.wheelInfos.length; i++) {
+        vehicle.updateWheelTransform(i);
+        const t = vehicle.wheelInfos[i].worldTransform;
+        const wg = wheelGroups[i].group;
+        wg.position.set(t.position.x, t.position.y, t.position.z);
+        wg.quaternion.set(t.quaternion.x, t.quaternion.y, t.quaternion.z, t.quaternion.w);
       }
 
-      const targetNormal = isOnGround 
-        ? new THREE.Vector3(groundNormal.x, groundNormal.y, groundNormal.z).normalize() 
-        : new THREE.Vector3(0, 1, 0);
-
-      visualNormal.lerp(targetNormal, 0.1);
-
-      // Reconstruct target basis from visual normal and yaw
-      const fwdHorizontal = new THREE.Vector3(-Math.sin(carYaw), 0, -Math.cos(carYaw));
-      const dot = fwdHorizontal.dot(visualNormal);
-      const fwdSloped = new THREE.Vector3()
-        .copy(fwdHorizontal)
-        .sub(visualNormal.clone().multiplyScalar(dot))
-        .normalize();
-
-      const backward = fwdSloped.clone().negate().normalize();
-      const right = new THREE.Vector3().crossVectors(visualNormal, backward).normalize();
-      const up = new THREE.Vector3().crossVectors(backward, right).normalize();
-
-      const matrix = new THREE.Matrix4();
-      matrix.makeBasis(right, up, backward);
-      const targetQuat = new THREE.Quaternion().setFromRotationMatrix(matrix);
-
-      // Sync visuals
-      carGroup.position.copy(chassisBody.position);
-      carGroup.quaternion.slerp(targetQuat, 0.15);
-
-      // Roll and steering animations for wheels
-      let currentForwardSpeed = velocity.dot(fwdSloped);
-      if (Math.abs(currentForwardSpeed) < 0.05) currentForwardSpeed = 0;
-      const wheelRadius = 0.35;
-      const rollDelta = (currentForwardSpeed / wheelRadius) * delta;
-
-      wheelGroups.forEach(w => {
-        w.spinGroup.rotation.x += rollDelta;
-        if (w.isFront) {
-          let targetWheelSteer = 0;
-          if (keys['ArrowLeft'] || keys['KeyA']) targetWheelSteer = 0.4;
-          else if (keys['ArrowRight'] || keys['KeyD']) targetWheelSteer = -0.4;
-          w.group.rotation.y += (targetWheelSteer - w.group.rotation.y) * 0.2;
-        }
-      });
-
-      // Sync dynamic scenery/props
+      // Sync dynamic props (pins)
       props.forEach(p => {
         if(!p.static) {
            p.mesh.position.copy(p.body.position);
@@ -615,12 +793,24 @@ function App() {
          if (z.monument) {
              const targetScale = (activeZoneRef.current === z.id) ? 1.0 : 0.001;
              z.monument.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.05);
+             
+             if (z.id === 'about') {
+                z.monument.rotation.y += 0.01;
+                z.monument.rotation.x += 0.005;
+             } else if (z.id === 'stack') {
+                z.monument.children.forEach((child, idx) => {
+                   child.rotation.y += (idx % 2 === 0 ? 0.01 : -0.01);
+                 });
+             } else if (z.id === 'contact') {
+                z.monument.rotation.y += 0.015;
+                z.monument.rotation.z = Math.sin(clock.elapsedTime * 1.5) * 0.25;
+             }
          }
       });
 
-      // Calculate speed for HUD/zones (using local forward speed relative to visual heading)
-      const speedVal = velocity.dot(fwdSloped);
-      const speedKmh = Math.abs(speedVal) * 3.6;
+      // Calculate speed for HUD/zones (using actual velocity)
+      const speedVal = chassisBody.velocity.length();
+      const speedKmh = speedVal * 3.6;
 
       let closestZone = null;
       let minZoneDist = Infinity;
@@ -630,13 +820,13 @@ function App() {
          const dist = Math.sqrt(dx*dx + dz*dz);
          if (dist < minZoneDist) {
             minZoneDist = dist;
-            if (dist < 3.5) {
+            if (dist < 4.0) {
                closestZone = z.id;
             }
          }
       });
 
-      // State machine for zone entry/exit with speed/distance hysteresis
+      // State machine for zone entry/exit
       if (activeZoneRef.current) {
          const activeZoneObj = zones.find(z => z.id === activeZoneRef.current);
          let shouldExit = true;
@@ -644,8 +834,7 @@ function App() {
             const dx = activeZoneObj.position.x - chassisBody.position.x;
             const dz = activeZoneObj.position.z - chassisBody.position.z;
             const dist = Math.sqrt(dx*dx + dz*dz);
-            // Remain in zone only if we are still close and haven't accelerated to high speed
-            if (dist < 4.0 && speedKmh < 5.0) {
+            if (dist < 5.0) {
                shouldExit = false;
             }
          }
@@ -654,27 +843,39 @@ function App() {
             window.dispatchEvent(new CustomEvent('zone-leave'));
          }
       } else {
-         // Enter zone if parked (speed < 1.0 km/h) inside the zone radius (< 3.5)
-         if (closestZone && speedKmh < 1.0) {
+         if (closestZone && speedKmh < 8.0) {
             activeZoneRef.current = closestZone;
             window.dispatchEvent(new CustomEvent('zone-enter', { detail: closestZone }));
          }
       }
 
-      // Camera Logic
+      // Camera Logic (Chase & Area Camera)
       if (activeZoneRef.current) {
          // Area View Camera
-         const areaTarget = new THREE.Vector3().copy(chassisBody.position);
-         const areaOffset = new THREE.Vector3(-15, 20, 15); // High diagonal overhead view
+         const areaTarget = new THREE.Vector3(
+           chassisBody.position.x, chassisBody.position.y, chassisBody.position.z
+         );
+         const areaOffset = new THREE.Vector3(-15, 20, 15);
          const desiredCamPos = areaTarget.clone().add(areaOffset);
-         camera.position.lerp(desiredCamPos, 0.03); // Slower, cinematic pan
+         camera.position.lerp(desiredCamPos, 0.03);
          camTarget.lerp(areaTarget, 0.05);
       } else {
-         // Chase Camera
-         const carPos = new THREE.Vector3().copy(chassisBody.position);
-         const offset = new THREE.Vector3(0, 6, 12).applyQuaternion(carGroup.quaternion);
+         // Upright Chase Camera (No roll/pitch orientation tracking to avoid disorientation)
+         const cameraQ = new THREE.Quaternion(
+           chassisBody.quaternion.x, chassisBody.quaternion.y,
+           chassisBody.quaternion.z, chassisBody.quaternion.w
+         );
+         const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQ);
+         const yaw = Math.atan2(forward.x, forward.z);
+         
+         const carPos = new THREE.Vector3(
+           chassisBody.position.x, chassisBody.position.y, chassisBody.position.z
+         );
+         const offset = new THREE.Vector3(0, 5, 11);
+         offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+         
          const desiredCamPos = carPos.clone().add(offset);
-         camera.position.lerp(desiredCamPos, 0.08); // Snappier chase
+         camera.position.lerp(desiredCamPos, 0.08);
          camTarget.lerp(carPos, 0.15);
       }
       camera.lookAt(camTarget);
@@ -697,11 +898,12 @@ function App() {
       window.removeEventListener('resize', onResize);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKey);
+      window.removeEventListener('drive-to-zone', onDriveTo);
       cancelAnimationFrame(reqId);
       if (container && renderer.domElement) container.removeChild(renderer.domElement);
       renderer.dispose();
     };
-  }, [prefersReducedMotion]); // Kept empty to prevent re-instantiation
+  }, [prefersReducedMotion]);
 
   // Custom Cursor
   useEffect(() => {
@@ -854,12 +1056,12 @@ function App() {
 
       <nav id="navbar" className={scrolled ? 'scrolled' : ''}>
         <div className="container nav-inner">
-          <InteractiveEl as="a" href="#" className="logo">HITESH.DEV</InteractiveEl>
+          <InteractiveEl as="a" href="#" onClick={(e) => { e.preventDefault(); window.dispatchEvent(new CustomEvent('drive-to-zone', { detail: 'reset' })); }} className="logo">HITESH.DEV</InteractiveEl>
           <div className="nav-links">
-            <InteractiveEl as="a" href="#work" className={`nav-item ${activeSection === 'work' ? 'active' : ''}`}>Work</InteractiveEl>
-            <InteractiveEl as="a" href="#about" className={`nav-item ${activeSection === 'about' ? 'active' : ''}`}>About</InteractiveEl>
-            <InteractiveEl as="a" href="#stack" className={`nav-item ${activeSection === 'stack' ? 'active' : ''}`}>Stack</InteractiveEl>
-            <InteractiveEl as="a" href="#contact" className={`nav-item ${activeSection === 'contact' ? 'active' : ''}`}>Contact</InteractiveEl>
+            <InteractiveEl as="a" href="#work" onClick={(e) => handleNavClick(e, 'hiresia')} className={`nav-item ${activeZone === 'hiresia' || activeZone === 'rapidrescue' ? 'active' : ''}`}>Work</InteractiveEl>
+            <InteractiveEl as="a" href="#about" onClick={(e) => handleNavClick(e, 'about')} className={`nav-item ${activeZone === 'about' || activeZone === 'experience' ? 'active' : ''}`}>About</InteractiveEl>
+            <InteractiveEl as="a" href="#stack" onClick={(e) => handleNavClick(e, 'stack')} className={`nav-item ${activeZone === 'stack' ? 'active' : ''}`}>Stack</InteractiveEl>
+            <InteractiveEl as="a" href="#contact" onClick={(e) => handleNavClick(e, 'contact')} className={`nav-item ${activeZone === 'contact' ? 'active' : ''}`}>Contact</InteractiveEl>
           </div>
         </div>
       </nav>
@@ -871,9 +1073,9 @@ function App() {
           
           {/* Bruno Simon Style HUD / Overlays */}
           {activeZone && (
-            <div style={{
+            <div className="game-hud-scroll" style={{
               position: 'absolute', top: '0', right: '0', bottom: '0', width: '450px',
-              background: theme === 'dark' ? 'rgba(10, 10, 12, 0.85)' : 'rgba(255, 255, 255, 0.85)',
+              background: theme === 'dark' ? 'rgba(10, 10, 12, 0.9)' : 'rgba(255, 255, 255, 0.9)',
               backdropFilter: 'blur(30px)', borderLeft: theme === 'dark' ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
               color: theme === 'dark' ? '#fff' : '#000', zIndex: 100,
               boxShadow: '-20px 0 40px rgba(0,0,0,0.3)',
@@ -887,67 +1089,148 @@ function App() {
                 .game-hud-scroll::-webkit-scrollbar-track { background: transparent; }
                 .game-hud-scroll::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 10px; }
               `}</style>
-              <div style={{ fontSize: '12px', fontWeight: 'bold', letterSpacing: '2px', color: '#8FAF8C', marginBottom: '16px' }}>
-                {activeZone === 'hiresia' || activeZone === 'rapidrescue' ? 'PROJECT UNLOCKED' : 'AREA UNLOCKED'}
-              </div>
-              <h2 style={{margin: '0 0 24px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>
-                {activeZone === 'hiresia' ? 'Hiresia ATS' : activeZone === 'rapidrescue' ? 'RapidRescueQ' : 'Experience & Skills'}
-              </h2>
               
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 'bold', letterSpacing: '2px', color: '#8FAF8C' }}>
+                  {activeZone === 'hiresia' || activeZone === 'rapidrescue' ? 'PROJECT UNLOCKED' : 'ZONE REACHED'}
+                </span>
+                <span style={{ fontSize: '11px', opacity: 0.5, fontStyle: 'italic' }}>Zone: {activeZone}</span>
+              </div>
+
+              {/* Hiresia Zone */}
               {activeZone === 'hiresia' && (
                 <div>
-                  <span style={{ display: 'inline-block', padding: '6px 12px', background: '#FF6B6B', color: '#fff', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>FULL STACK ATS</span>
+                  <h2 style={{margin: '0 0 8px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>Hiresia ATS</h2>
+                  <span style={{ display: 'inline-block', padding: '4px 10px', background: '#FF6B6B', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>FULL STACK ATS</span>
                   <p style={{lineHeight: '1.8', marginBottom: '24px', opacity: 0.8, fontSize: '15px'}}>A complete MERN-based Applicant Tracking System featuring advanced analytics, role-based access control, and seamless scheduling. Designed to handle hundreds of concurrent applications with zero downtime.</p>
-                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                     {['MongoDB', 'Express', 'React', 'Node.js', 'AWS'].map(tech => (
+                  <ul style={{ paddingLeft: '20px', lineHeight: '1.8', marginBottom: '24px', fontSize: '14px', opacity: 0.85 }}>
+                    {projectsData.hiresia.bullets.map((b, i) => <li key={i} style={{ marginBottom: '8px' }}>{b}</li>)}
+                  </ul>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '24px' }}>
+                     {['MongoDB', 'Express', 'React', 'Node.js', 'AWS', 'Vercel'].map(tech => (
                         <span key={tech} style={{ padding: '6px 12px', background: theme==='dark'?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
                      ))}
                   </div>
+                  <InteractiveEl as="a" href={projectsData.hiresia.link} target="_blank" rel="noreferrer" className="btn-primary" style={{display: 'inline-block', textDecoration: 'none'}}>Visit Live Platform &rarr;</InteractiveEl>
                 </div>
               )}
 
+              {/* RapidRescueQ Zone */}
               {activeZone === 'rapidrescue' && (
                 <div>
-                  <span style={{ display: 'inline-block', padding: '6px 12px', background: '#4CAF50', color: '#fff', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>COORDINATION PLATFORM</span>
+                  <h2 style={{margin: '0 0 8px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>RapidRescueQ</h2>
+                  <span style={{ display: 'inline-block', padding: '4px 10px', background: '#4CAF50', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>COORDINATION PLATFORM</span>
                   <p style={{lineHeight: '1.8', marginBottom: '24px', opacity: 0.8, fontSize: '15px'}}>A live camera-based emergency reporting and coordination platform for public reporters and NGOs. Utilizes WebRTC for live streaming and geolocation for immediate dispatch.</p>
-                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                     {['React Native', 'WebRTC', 'Socket.io', 'Node.js'].map(tech => (
+                  <ul style={{ paddingLeft: '20px', lineHeight: '1.8', marginBottom: '24px', fontSize: '14px', opacity: 0.85 }}>
+                    {projectsData.rapidrescue.bullets.map((b, i) => <li key={i} style={{ marginBottom: '8px' }}>{b}</li>)}
+                  </ul>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '24px' }}>
+                     {['React Native', 'WebRTC', 'Socket.io', 'Node.js', 'Expo', 'Render'].map(tech => (
                         <span key={tech} style={{ padding: '6px 12px', background: theme==='dark'?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
                      ))}
                   </div>
                 </div>
               )}
 
-              {(activeZone === 'experience' || activeZone === 'about') && (
-                <div className="game-hud-scroll" style={{ overflowY: 'auto', paddingRight: '10px' }}>
-                  <p style={{lineHeight: '1.8', marginBottom: '40px', opacity: 0.9, fontSize: '16px'}}>I am a passionate software developer specializing in building production-ready mobile applications and investor-facing web platforms.</p>
+              {/* About Zone */}
+              {activeZone === 'about' && (
+                <div>
+                  <h2 style={{margin: '0 0 8px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>About Me</h2>
+                  <span style={{ display: 'inline-block', padding: '4px 10px', background: '#be4bdb', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>CREATIVE DEVELOPER</span>
+                  <p style={{lineHeight: '1.8', marginBottom: '20px', opacity: 0.85, fontSize: '15px'}}>
+                    Hello! I'm Hitesh, a software engineer with a deep love for building fluid mobile applications and investor-facing web platforms.
+                  </p>
+                  <p style={{lineHeight: '1.8', marginBottom: '24px', opacity: 0.8, fontSize: '15px'}}>
+                    I specialize in full-stack JavaScript development, reactive user interfaces, and engaging 3D web spaces. My goal is to make computing intuitive, performant, and delightful to interact with.
+                  </p>
+                  <h3 style={{ fontSize: '18px', marginBottom: '12px', borderBottom: theme==='dark'?'1px solid rgba(255,255,255,0.1)':'1px solid rgba(0,0,0,0.1)', paddingBottom: '8px' }}>Education & Interests</h3>
+                  <ul style={{ paddingLeft: '20px', lineHeight: '1.8', fontSize: '14px', opacity: 0.85, marginBottom: '0' }}>
+                    <li style={{ marginBottom: '6px' }}><strong>B.Tech in Computer Science</strong> — focus on systems and interfaces.</li>
+                    <li style={{ marginBottom: '6px' }}><strong>Creative Coding</strong> — Three.js, WebGL, shaders, and physics engines.</li>
+                    <li style={{ marginBottom: '6px' }}><strong>App Development</strong> — Expo, React Native, and mobile design systems.</li>
+                  </ul>
+                </div>
+              )}
+
+              {/* Experience Zone */}
+              {activeZone === 'experience' && (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <h2 style={{margin: '0 0 8px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>Experience</h2>
+                  <span style={{ display: 'inline-block', padding: '4px 10px', background: '#ffd43b', color: '#000', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>CAREER TIMELINE</span>
                   
-                  <h3 style={{ fontSize: '18px', marginBottom: '16px', borderBottom: theme==='dark'?'1px solid rgba(255,255,255,0.1)':'1px solid rgba(0,0,0,0.1)', paddingBottom: '8px' }}>Experience</h3>
-                  
-                  <div style={{ marginBottom: '24px' }}>
+                  <div style={{ marginBottom: '24px', borderLeft: '2px solid #ffd43b', paddingLeft: '16px' }}>
                     <div style={{ fontSize: '12px', opacity: 0.6, marginBottom: '4px', fontWeight: 'bold' }}>APR 2024 – PRESENT</div>
-                    <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '8px' }}>Software Dev Intern @ Grade Capital</div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '4px' }}>Software Dev Intern</div>
+                    <div style={{ fontSize: '14px', color: '#ffd43b', fontWeight: '500', marginBottom: '8px' }}>Grade Capital</div>
                     <p style={{ fontSize: '14px', opacity: 0.8, lineHeight: '1.6' }}>Contributed to production-ready mobile apps and investor-facing web platforms using React Native and React.js.</p>
                   </div>
                   
-                  <div style={{ marginBottom: '40px' }}>
+                  <div style={{ marginBottom: '24px', borderLeft: '2px solid rgba(255,255,255,0.2)', paddingLeft: '16px' }}>
                     <div style={{ fontSize: '12px', opacity: 0.6, marginBottom: '4px', fontWeight: 'bold' }}>DEC 2023 – APR 2024</div>
-                    <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '8px' }}>App Dev Intern @ Yzxx</div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '4px' }}>App Dev Intern</div>
+                    <div style={{ fontSize: '14px', color: '#be4bdb', fontWeight: '500', marginBottom: '8px' }}>Yzxx</div>
                     <p style={{ fontSize: '14px', opacity: 0.8, lineHeight: '1.6' }}>Designed and developed a cross-platform mobile application using React Native and Expo.</p>
                   </div>
+                </div>
+              )}
 
-                  <h3 style={{ fontSize: '18px', marginBottom: '16px', borderBottom: theme==='dark'?'1px solid rgba(255,255,255,0.1)':'1px solid rgba(0,0,0,0.1)', paddingBottom: '8px' }}>Core Skills</h3>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                     {['JavaScript', 'React Native', 'React.js', 'Node.js', 'MongoDB', 'AWS', 'Expo'].map(tech => (
-                        <span key={tech} style={{ padding: '6px 12px', background: theme==='dark'?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
-                     ))}
+              {/* Stack Zone */}
+              {activeZone === 'stack' && (
+                <div>
+                  <h2 style={{margin: '0 0 8px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>Tech Stack</h2>
+                  <span style={{ display: 'inline-block', padding: '4px 10px', background: '#ff922b', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>SKILLS MATRIX</span>
+                  
+                  <div style={{ marginBottom: '20px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '10px' }}>Frontend & Immersive</div>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                       {['React.js', 'React Native', 'Expo', 'Three.js', 'WebGL', 'JavaScript (ES6+)'].map(tech => (
+                          <span key={tech} style={{ padding: '6px 12px', background: 'rgba(255,146,43,0.15)', border: '1px solid rgba(255,146,43,0.3)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
+                       ))}
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '20px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '10px' }}>Backend & Real-Time</div>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                       {['Node.js', 'Express', 'Socket.io', 'RESTful APIs'].map(tech => (
+                          <span key={tech} style={{ padding: '6px 12px', background: 'rgba(76,175,80,0.15)', border: '1px solid rgba(76,175,80,0.3)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
+                       ))}
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '20px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '10px' }}>Databases & Cloud</div>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                       {['MongoDB', 'PostgreSQL', 'AWS', 'Vercel', 'Render', 'Docker'].map(tech => (
+                          <span key={tech} style={{ padding: '6px 12px', background: 'rgba(77,171,247,0.15)', border: '1px solid rgba(77,171,247,0.3)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
+                       ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Contact Zone */}
+              {activeZone === 'contact' && (
+                <div>
+                  <h2 style={{margin: '0 0 8px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>Contact Me</h2>
+                  <span style={{ display: 'inline-block', padding: '4px 10px', background: '#ff6b6b', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>GET IN TOUCH</span>
+                  
+                  <div style={{ marginBottom: '20px', fontSize: '14px', opacity: 0.85 }}>
+                    <p style={{ marginBottom: '8px' }}><strong>Email:</strong> hitesh@example.com</p>
+                    <p style={{ marginBottom: '8px' }}><strong>GitHub:</strong> github.com/hitesh</p>
+                    <p style={{ marginBottom: '16px' }}><strong>LinkedIn:</strong> linkedin.com/in/hitesh</p>
+                  </div>
+                  
+                  <div style={{ borderTop: theme==='dark'?'1px solid rgba(255,255,255,0.1)':'1px solid rgba(0,0,0,0.1)', paddingTop: '20px' }}>
+                    <h4 style={{ margin: '0 0 12px 0', fontSize: '15px' }}>Send a Message</h4>
+                    <ContactForm theme={theme} />
                   </div>
                 </div>
               )}
 
               <div style={{marginTop: 'auto', paddingTop: '40px', fontSize: '13px', opacity: 0.5, display: 'flex', alignItems: 'center', gap: '8px'}}>
                  <span style={{background: theme === 'dark' ? '#333' : '#ddd', padding: '4px 8px', borderRadius: '4px', fontWeight: 'bold', color: theme==='dark'?'#fff':'#000'}}>W</span>
-                 Press W to drive away and exit
+                 Drive away or press W to exit
               </div>
             </div>
           )}
@@ -962,9 +1245,11 @@ function App() {
             <div style={{textAlign: 'center'}}><div style={{fontWeight: 'bold', fontSize: '22px', fontFamily: '"Space Grotesk", sans-serif'}}>WASD</div><div style={{fontSize: '11px', opacity: 0.6, letterSpacing: '1px'}}>DRIVE</div></div>
             <div style={{width: '1px', background: theme === 'dark' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)'}}></div>
             <div style={{textAlign: 'center'}}><div style={{fontWeight: 'bold', fontSize: '22px', fontFamily: '"Space Grotesk", sans-serif'}}>SPACE</div><div style={{fontSize: '11px', opacity: 0.6, letterSpacing: '1px'}}>BRAKE</div></div>
+            <div style={{width: '1px', background: theme === 'dark' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)'}}></div>
+            <div style={{textAlign: 'center'}}><div style={{fontWeight: 'bold', fontSize: '22px', fontFamily: '"Space Grotesk", sans-serif'}}>R</div><div style={{fontSize: '11px', opacity: 0.6, letterSpacing: '1px'}}>FLIP / RESET</div></div>
           </div>
           </section>
-  </main>
+      </main>
 
       
     </>
