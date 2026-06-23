@@ -449,7 +449,8 @@ function App() {
       linearDamping: 0.1,
       angularDamping: 0.6
     });
-    chassisBody.addShape(chassisShape);
+    // Shift shape UP by 0.2 so the physical Center of Mass drops DOWN by 0.2
+    chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.2, 0));
     chassisBody.position.set(0, 1.5, 5); // Start position
     // NOTE: Do NOT call world.addBody(chassisBody) here — vehicle.addToWorld() does this
 
@@ -502,8 +503,8 @@ function App() {
 
     const buggyColor = theme === 'dark' ? 0xff6b6b : 0xe03131; // deep vibrant red
     const bodyVisual = new THREE.MeshStandardMaterial({ color: buggyColor, roughness: 0.2, metalness: 0.1 });
-    const darkVisual = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
-    const lightVisual = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffee, emissiveIntensity: 1.0 });
+    const darkVisual = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
+    const headlightMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 2 });
     const rimVisual = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
 
     // Main Chassis
@@ -515,32 +516,31 @@ function App() {
 
     // Cabin
     const topBody = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 1.2), darkVisual);
-    topBody.position.set(0, 1.05, 0.1);
+    topBody.position.set(0, 1.05, -0.1); // Shifted backwards
     topBody.castShadow = true;
     carGroup.add(topBody);
 
     // Front Bumper
-    const bumper = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 1.4, 16), darkVisual);
-    bumper.rotation.z = Math.PI / 2;
-    bumper.position.set(0, 0.5, -1.25);
+    const bumper = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.2, 0.3), darkVisual);
+    bumper.position.set(0, 0.5, 1.25); // +Z is front
     bumper.castShadow = true;
     carGroup.add(bumper);
 
     // Headlights
-    const hL = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.15, 0.05), lightVisual);
-    hL.position.set(-0.4, 0.6, -1.22);
+    const hL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.1), headlightMat);
+    hL.position.set(-0.4, 0.6, 1.22); // +Z is front
     carGroup.add(hL);
-    const hR = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.15, 0.05), lightVisual);
-    hR.position.set(0.4, 0.6, -1.22);
+    const hR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.1), headlightMat);
+    hR.position.set(0.4, 0.6, 1.22); // +Z is front
     carGroup.add(hR);
 
     // Wheels
     const wheelGroups = [];
     const wheelOffsets = [
-      [-0.75, -0.25, -0.9], // FL
-      [0.75, -0.25, -0.9],  // FR
-      [-0.75, -0.25, 0.9],  // RL
-      [0.75, -0.25, 0.9]   // RR
+      [-0.75, -0.25, 0.9],  // FL
+      [0.75, -0.25, 0.9],   // FR
+      [-0.75, -0.25, -0.9], // RL
+      [0.75, -0.25, -0.9]   // RR
     ];
 
     wheelOffsets.forEach(([x, y, z]) => {
@@ -561,7 +561,7 @@ function App() {
       wheelSpinGroup.add(hub);
 
       scene.add(wg); // Added directly to scene to prevent double translation
-      wheelGroups.push({ group: wg, spinGroup: wheelSpinGroup, isFront: z < 0 });
+      wheelGroups.push({ group: wg, spinGroup: wheelSpinGroup, isFront: z > 0 });
     });
 
     // ── CONTROLS ────────────────────────────────────────────────────────────
@@ -658,7 +658,7 @@ function App() {
         chassisBody.velocity.set(0, 0, 0);
         chassisBody.angularVelocity.set(0, 0, 0);
         // Extract current yaw from chassis quaternion and reset to upright
-        const fwd = new THREE.Vector3(0, 0, -1);
+        const fwd = new THREE.Vector3(0, 0, 1);
         fwd.applyQuaternion(new THREE.Quaternion(
           chassisBody.quaternion.x, chassisBody.quaternion.y,
           chassisBody.quaternion.z, chassisBody.quaternion.w
@@ -676,67 +676,94 @@ function App() {
       let engineForce = 0;
       let currentBrake = 0;
 
+      // Allow user to break out of autopilot instantly
+      if (autopilotTarget || testAutoDrive) {
+         if (keys['KeyW'] || keys['KeyS'] || keys['KeyA'] || keys['KeyD'] || keys['Space'] || 
+             keys['ArrowUp'] || keys['ArrowDown'] || keys['ArrowLeft'] || keys['ArrowRight']) {
+            autopilotTarget = null;
+            testAutoDrive = false;
+         }
+      }
+
       if (autopilotTarget) {
         const dx = autopilotTarget.x - chassisBody.position.x;
         const dz = autopilotTarget.z - chassisBody.position.z;
         const dist = Math.sqrt(dx*dx + dz*dz);
-        if (dist > 3.5) {
-          const targetAngle = Math.atan2(-dx, -dz);
+        const speed = chassisBody.velocity.length();
+        const brakeDist = Math.max(3.5, speed * 0.8);
+
+        if (dist > brakeDist) {
+          const targetAngle = Math.atan2(dx, dz);
           const chassisQ = new THREE.Quaternion(
             chassisBody.quaternion.x, chassisBody.quaternion.y,
             chassisBody.quaternion.z, chassisBody.quaternion.w
           );
-          const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(chassisQ);
+          const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(chassisQ);
           const currentAngle = Math.atan2(forward.x, forward.z);
           let angleDiff = targetAngle - currentAngle;
           angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
 
-          steerValue = Math.max(-maxSteerVal, Math.min(maxSteerVal, -angleDiff * 1.8));
-          engineForce = -maxForce * 0.7;
+          steerValue = Math.max(-maxSteerVal, Math.min(maxSteerVal, angleDiff * 1.8));
+          engineForce = maxForce * 0.7;
           currentBrake = 0;
         } else {
-          engineForce = 0;
-          currentBrake = brakeForce;
-          autopilotTarget = null;
-          // Clear active keys
-          keys['KeyW'] = false;
-          keys['KeyS'] = false;
-          keys['Space'] = false;
-          keys['ArrowUp'] = false;
-          keys['ArrowDown'] = false;
+          // Smooth brake
+          if (speed > 0.5) {
+             engineForce = 0;
+             currentBrake = brakeForce;
+             steerValue = 0;
+          } else {
+             engineForce = 0;
+             currentBrake = brakeForce;
+             autopilotTarget = null;
+             keys['KeyW'] = false; keys['KeyS'] = false; keys['Space'] = false;
+          }
         }
       } else if (testAutoDrive) {
         const dx = 0 - chassisBody.position.x;
         const dz = -35 - chassisBody.position.z;
         const dist = Math.sqrt(dx*dx + dz*dz);
-        if (dist > 3.5) {
-          const targetAngle = Math.atan2(-dx, -dz);
+        const speed = chassisBody.velocity.length();
+        const brakeDist = Math.max(3.5, speed * 0.8);
+
+        if (dist > brakeDist) {
+          const targetAngle = Math.atan2(dx, dz);
           const chassisQ2 = new THREE.Quaternion(
             chassisBody.quaternion.x, chassisBody.quaternion.y,
             chassisBody.quaternion.z, chassisBody.quaternion.w
           );
-          const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(chassisQ2);
+          const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(chassisQ2);
           const currentAngle = Math.atan2(forward.x, forward.z);
           let angleDiff = targetAngle - currentAngle;
           angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
 
-          steerValue = Math.max(-maxSteerVal, Math.min(maxSteerVal, -angleDiff * 1.8));
-          engineForce = -maxForce * 0.7;
+          steerValue = Math.max(-maxSteerVal, Math.min(maxSteerVal, angleDiff * 1.8));
+          engineForce = maxForce * 0.7;
           currentBrake = 0;
         } else {
-          engineForce = 0;
-          currentBrake = brakeForce;
+          if (speed > 0.5) {
+             engineForce = 0;
+             currentBrake = brakeForce;
+             steerValue = 0;
+          } else {
+             engineForce = 0;
+             currentBrake = brakeForce;
+             testAutoDrive = false;
+          }
         }
       } else {
-        // Manual steering — positive steer value = RIGHT, negative = LEFT
+        // Manual steering
         if (keys['ArrowLeft'] || keys['KeyA']) steerValue = -maxSteerVal;
         else if (keys['ArrowRight'] || keys['KeyD']) steerValue = maxSteerVal;
 
-        // Manual engine force
+        // Manual engine force: Negative force drives forward (-Z)
         if (keys['ArrowUp'] || keys['KeyW']) engineForce = -maxForce;
         else if (keys['ArrowDown'] || keys['KeyS']) engineForce = maxForce;
 
-        if (keys['Space']) currentBrake = brakeForce;
+        if (keys['Space']) {
+           currentBrake = brakeForce;
+           engineForce = 0; // Cut throttle when braking
+        }
       }
 
       // Apply controls
@@ -843,7 +870,7 @@ function App() {
             window.dispatchEvent(new CustomEvent('zone-leave'));
          }
       } else {
-         if (closestZone && speedKmh < 8.0) {
+         if (closestZone) {
             activeZoneRef.current = closestZone;
             window.dispatchEvent(new CustomEvent('zone-enter', { detail: closestZone }));
          }
@@ -865,13 +892,13 @@ function App() {
            chassisBody.quaternion.x, chassisBody.quaternion.y,
            chassisBody.quaternion.z, chassisBody.quaternion.w
          );
-         const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(cameraQ);
+         const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(cameraQ); // +Z is forward
          const yaw = Math.atan2(forward.x, forward.z);
          
          const carPos = new THREE.Vector3(
            chassisBody.position.x, chassisBody.position.y, chassisBody.position.z
          );
-         const offset = new THREE.Vector3(0, 5, 11);
+         const offset = new THREE.Vector3(0, 5, -11); // Offset behind the +Z facing car
          offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
          
          const desiredCamPos = carPos.clone().add(offset);
