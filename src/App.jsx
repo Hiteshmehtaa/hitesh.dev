@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import * as CANNON from 'cannon-es';
 
 const projectsData = {
   hiresia: {
@@ -42,6 +43,8 @@ function App() {
   // Platform Features State
   const [theme, setTheme] = useState('light');
   const [selectedProject, setSelectedProject] = useState(null);
+  const [carHitItem, setCarHitItem] = useState(null);
+  const [activeZone, setActiveZone] = useState(null);
 
   useEffect(() => {
     document.body.className = theme === 'dark' ? 'dark-theme' : '';
@@ -51,174 +54,654 @@ function App() {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
-  // Three.js Background - Logical Scroll Journey
+
+  // Three.js + Cannon.js — Bruno Simon Style Playground
+  const activeZoneRef = useRef(null);
+
+  useEffect(() => {
+    const onEnter = (e) => setActiveZone(e.detail);
+    const onLeave = () => setActiveZone(null);
+    window.addEventListener('zone-enter', onEnter);
+    window.addEventListener('zone-leave', onLeave);
+    return () => {
+      window.removeEventListener('zone-enter', onEnter);
+      window.removeEventListener('zone-leave', onLeave);
+    }
+  }, []);
+
   useEffect(() => {
     if (prefersReducedMotion || !canvasContainerRef.current) return;
-
     const container = canvasContainerRef.current;
-    while (container.firstChild) {
-      container.removeChild(container.firstChild);
-    }
+    while (container.firstChild) container.removeChild(container.firstChild);
 
+    const W = container.clientWidth || window.innerWidth;
+    const H = container.clientHeight || window.innerHeight;
+
+
+    // ── THREE SETUP ──────────────────────────────────────────────────────────
     const scene = new THREE.Scene();
-    const fogColor = theme === 'dark' ? 0x0B0C10 : 0xF5F3EF;
-    scene.fog = new THREE.Fog(fogColor, 10, 80);
+    const BG = theme === 'dark' ? 0x222831 : 0xf2b880; // Bruno Simon warm clay
+    scene.background = new THREE.Color(BG);
+    scene.fog = new THREE.Fog(BG, 30, 100);
 
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 0, 5);
-
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: "high-performance" });
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    const camera = new THREE.PerspectiveCamera(45, W / H, 0.1, 500);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(W, H);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
 
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    scene.add(ambientLight);
+    // ── LIGHTING ────────────────────────────────────────────────────────────
+    const sun = new THREE.DirectionalLight(0xfff5e6, theme === 'dark' ? 1.0 : 1.5);
+    sun.position.set(30, 50, 30);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(4096, 4096); // High res shadows
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 150;
+    sun.shadow.camera.left = sun.shadow.camera.bottom = -60;
+    sun.shadow.camera.right = sun.shadow.camera.top = 60;
+    sun.shadow.bias = -0.0005;
+    scene.add(sun);
     
-    const dirLight = new THREE.DirectionalLight(0xffffff, 2);
-    dirLight.position.set(10, 20, 10);
-    scene.add(dirLight);
+    const ambient = new THREE.AmbientLight(0xffffff, theme === 'dark' ? 0.4 : 0.6);
+    scene.add(ambient);
+    
+    // Soft hemisphere light for clay look
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444455, theme === 'dark' ? 0.2 : 0.4);
+    scene.add(hemiLight);
 
-    const colorLight = new THREE.PointLight(theme === 'dark' ? 0x66FCF1 : 0x8FAF8C, 100, 100);
-    scene.add(colorLight);
+    // ── CANNON WORLD ────────────────────────────────────────────────────────
+    const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -15, 0) });
+    world.broadphase = new CANNON.SAPBroadphase(world);
+    world.allowSleep = false;
 
-    // --- Station 0: Hero Core (z = 0) ---
-    const coreGeo = new THREE.OctahedronGeometry(2, 0);
-    const coreMat = new THREE.MeshPhysicalMaterial({ color: theme === 'dark' ? 0x1F2833 : 0xE0DDD6, wireframe: true, transparent: true, opacity: 0.3 });
-    const coreMesh = new THREE.Mesh(coreGeo, coreMat);
-    coreMesh.position.set(0, 0, 0);
-    scene.add(coreMesh);
+    const groundMat = new CANNON.Material('ground');
+    const carMat = new CANNON.Material('car');
+    world.addContactMaterial(new CANNON.ContactMaterial(carMat, groundMat, { friction: 0.6, restitution: 0.1 }));
 
-    // --- Station 1: About Sphere (z = -50) ---
-    const sphereGeo = new THREE.IcosahedronGeometry(3, 1);
-    const sphereMat = new THREE.MeshPhysicalMaterial({ color: 0x8FAF8C, wireframe: true, transparent: true, opacity: 0.4 });
-    const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
-    sphereMesh.position.set(5, -2, -50);
-    scene.add(sphereMesh);
+    // ── GROUND ───────────────────────────────────────────────────────────────
+    const groundBody = new CANNON.Body({ mass: 0, material: groundMat });
+    groundBody.addShape(new CANNON.Plane());
+    groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+    world.addBody(groundBody);
 
-    // --- Station 2: Experience Pillars (z = -100) ---
-    const pillarsGroup = new THREE.Group();
-    const pillarGeo = new THREE.BoxGeometry(1, 10, 1);
-    const pillarMat = new THREE.MeshPhysicalMaterial({ color: theme === 'dark' ? 0x1A1A1A : 0xDDDDDD, metalness: 0.5, roughness: 0.2, clearcoat: 1 });
-    for (let i = 0; i < 5; i++) {
-      const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-      pillar.position.set(-6 + i * 3, -5 + i * 1.5, -100 - i * 5);
-      pillarsGroup.add(pillar);
+    const groundColor = theme === 'dark' ? 0x2d343f : 0xf2b880;
+    const groundVisual = new THREE.MeshStandardMaterial({ color: groundColor, roughness: 1.0, metalness: 0.0 });
+    const groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), groundVisual);
+    groundMesh.rotation.x = -Math.PI / 2;
+    groundMesh.receiveShadow = true;
+    scene.add(groundMesh);
+
+    // Subtle Grid
+    const grid = new THREE.GridHelper(300, 60, 0x000000, 0x000000);
+    grid.material.opacity = theme === 'dark' ? 0.1 : 0.05;
+    grid.material.transparent = true;
+    scene.add(grid);
+
+    // ── SCENERY & PROPS ──────────────────────────────────────────────────────
+    const props = [];
+    const blockMat = new THREE.MeshStandardMaterial({ color: 0xffa8a8, roughness: 0.4 });
+    const woodMat = new THREE.MeshStandardMaterial({ color: 0xc89666, roughness: 0.8 });
+    const treeMat = new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.9 });
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x795548, roughness: 0.9 });
+    const pinMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+
+    // Function to add a ramp
+    const addRamp = (x, z, rotationY) => {
+       const w = 4, h = 1.5, d = 4;
+       
+       // Physics shape: wedge
+       const shape = new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2));
+       const body = new CANNON.Body({ mass: 0 }); // static
+       body.addShape(shape);
+       body.position.set(x, 0, z);
+       body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI/12); // Slanted
+       // Lower the ramp into the ground so there is no vertical lip
+       body.position.y = -0.55;
+       world.addBody(body);
+
+       // We rotate the body locally, then apply rotationY
+       const euler = new CANNON.Vec3();
+       body.quaternion.toEuler(euler);
+       const qY = new CANNON.Quaternion();
+       qY.setFromAxisAngle(new CANNON.Vec3(0,1,0), rotationY);
+       body.quaternion = qY.mult(body.quaternion);
+
+       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat);
+       mesh.castShadow = true;
+       mesh.receiveShadow = true;
+       scene.add(mesh);
+       props.push({ body, mesh, static: true });
+    };
+
+    // Add trees (Static cylinders and cones)
+    const addTree = (x, z) => {
+       const treeGroup = new THREE.Group();
+       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 1.5, 8), trunkMat);
+       trunk.position.y = 0.75;
+       trunk.castShadow = true;
+       treeGroup.add(trunk);
+       
+       const leaves = new THREE.Mesh(new THREE.ConeGeometry(1.5, 3, 8), treeMat);
+       leaves.position.y = 2.5;
+       leaves.castShadow = true;
+       
+
+       treeGroup.add(leaves);
+       treeGroup.position.set(x, 0, z);
+       scene.add(treeGroup);
+       
+       const body = new CANNON.Body({ mass: 0 });
+       body.addShape(new CANNON.Cylinder(0.4, 0.4, 1.5, 8));
+       body.position.set(x, 0.75, z);
+       // Cannon cylinder needs rotation
+       const q = new CANNON.Quaternion();
+       q.setFromAxisAngle(new CANNON.Vec3(1,0,0), -Math.PI/2);
+       body.quaternion.copy(q);
+       world.addBody(body);
+    };
+
+    // Add bowling pins (Dynamic)
+    const addPin = (x, z) => {
+       const body = new CANNON.Body({ mass: 1 });
+       body.addShape(new CANNON.Cylinder(0.2, 0.2, 1.0, 8));
+       body.position.set(x, 1.0, z);
+       body.linearDamping = 0.4;
+       body.angularDamping = 0.4;
+       const q = new CANNON.Quaternion();
+       q.setFromAxisAngle(new CANNON.Vec3(1,0,0), -Math.PI/2);
+       body.quaternion.copy(q);
+       world.addBody(body);
+
+       const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.0, 16), pinMat);
+       mesh.castShadow = true;
+       mesh.receiveShadow = true;
+       scene.add(mesh);
+       props.push({ body, mesh });
+    };
+
+    // Populate Environment
+    addRamp(-5, -10, 0);
+    addRamp(20, -15, Math.PI/2);
+
+    for(let i=0; i<15; i++) {
+       addTree((Math.random() - 0.5) * 80, (Math.random() - 0.5) * 80);
     }
-    scene.add(pillarsGroup);
 
-    // --- Station 3: Project Gallery Screens (z = -150) ---
-    const textureLoader = new THREE.TextureLoader();
-    const screensGroup = new THREE.Group();
-    const screenGeo = new THREE.PlaneGeometry(8, 4.5);
+    // Set up pins
+    [[-10,-20], [-10.5,-20.5], [-9.5,-20.5], [-11,-21], [-10,-21], [-9,-21]].forEach(pos => addPin(pos[0], pos[1]));
+
+    // ── DISCOVERY ZONES ──────────────────────────────────────────────────────
     
-    const matHiresia = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
-    textureLoader.load(projectsData.hiresia.image, (tex) => { matHiresia.map = tex; matHiresia.needsUpdate = true; });
-    const screen1 = new THREE.Mesh(screenGeo, matHiresia);
-    screen1.position.set(-5, 0, -150);
-    screen1.rotation.y = Math.PI / 6;
-    screensGroup.add(screen1);
+    // Zone Monuments
+    const monMat1 = new THREE.MeshStandardMaterial({ color: 0xFF6B6B, roughness: 0.2, metalness: 0.8 });
+    const monMat2 = new THREE.MeshStandardMaterial({ color: 0x4CAF50, roughness: 0.2, metalness: 0.8 });
+    const monMat3 = new THREE.MeshStandardMaterial({ color: 0x66FCF1, roughness: 0.2, metalness: 0.8 });
 
-    const matRapid = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
-    textureLoader.load(projectsData.rapidrescue.image, (tex) => { matRapid.map = tex; matRapid.needsUpdate = true; });
-    const screen2 = new THREE.Mesh(screenGeo, matRapid);
-    screen2.position.set(5, -3, -160);
-    screen2.rotation.y = -Math.PI / 6;
-    screensGroup.add(screen2);
-    scene.add(screensGroup);
+    const hMon = new THREE.Group();
+    [0, 1.2, 2.4].forEach(y => { const srv = new THREE.Mesh(new THREE.BoxGeometry(3, 1, 3), monMat1); srv.position.y = y; srv.castShadow = true; hMon.add(srv); });
+    hMon.position.set(-16, 0.5, -15);
+    hMon.scale.set(0.001, 0.001, 0.001);
+    scene.add(hMon);
 
-    // --- Station 4: Contact Portal (z = -200) ---
-    const portalGeo = new THREE.TorusGeometry(4, 0.2, 16, 100);
-    const portalMat = new THREE.MeshBasicMaterial({ color: theme === 'dark' ? 0x66FCF1 : 0x8FAF8C });
-    const portalMesh = new THREE.Mesh(portalGeo, portalMat);
-    portalMesh.position.set(0, 0, -200);
-    scene.add(portalMesh);
+    const rMon = new THREE.Group();
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 0.5, 16), monMat2);
+    const dish = new THREE.Mesh(new THREE.SphereGeometry(1.5, 16, 16, 0, Math.PI), monMat2);
+    dish.position.y = 1.5; dish.rotation.x = -Math.PI/4;
+    rMon.add(base); rMon.add(dish);
+    rMon.position.set(19, 0.5, -20);
+    rMon.scale.set(0.001, 0.001, 0.001);
+    scene.add(rMon);
 
-    let mouseX = 0; let mouseY = 0;
-    const onMouseMove = (event) => {
-      mouseX = (event.clientX - window.innerWidth / 2) * 0.002;
-      mouseY = (event.clientY - window.innerHeight / 2) * 0.002;
+    const eMon = new THREE.Mesh(new THREE.BoxGeometry(4, 10, 4), monMat3);
+    eMon.position.set(0, 5, -40);
+    eMon.castShadow = true;
+    eMon.scale.set(0.001, 0.001, 0.001);
+    scene.add(eMon);
+
+    const zones = [];
+    const createZone = (id, x, z, color, monument) => {
+      const padGeo = new THREE.CylinderGeometry(3.0, 3.0, 0.1, 32);
+      const padMat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6 });
+      const pad = new THREE.Mesh(padGeo, padMat);
+      pad.position.set(x, 0.05, z);
+      pad.receiveShadow = true;
+      scene.add(pad);
+      
+      const ringGeo = new THREE.TorusGeometry(2.5, 0.08, 16, 48);
+      const ringMat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.8 });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.position.set(x, 1.5, z);
+      ring.rotation.x = Math.PI / 2;
+      ring.castShadow = true;
+      scene.add(ring);
+      
+      zones.push({ id, position: new THREE.Vector3(x, 0, z), ring, monument });
     };
-    window.addEventListener('mousemove', onMouseMove);
 
-    let scrollY = window.scrollY;
-    const onScroll = () => {
-      scrollY = window.scrollY;
+    createZone('hiresia', -12, -15, 0x4dabf7, hMon);
+    createZone('rapidrescue', 15, -20, 0x38d9a9, rMon);
+    createZone('experience', 0, -35, 0xffd43b, eMon);
+
+    // ── TOY BUGGY PHYSICS (SPHERE CONTROLLER) ────────────────────────────────
+    const sphereRadius = 0.6;
+    const sphereMat = new CANNON.Material('sphere');
+    world.addContactMaterial(new CANNON.ContactMaterial(sphereMat, groundMat, {
+      friction: 0.1,
+      restitution: 0.1
+    }));
+
+    const chassisBody = new CANNON.Body({
+      mass: 25,
+      shape: new CANNON.Sphere(sphereRadius),
+      material: sphereMat,
+      linearDamping: 0.1,
+      angularDamping: 0.99
+    });
+    chassisBody.position.set(0, 2, 5); // Start higher to fall safely
+    world.addBody(chassisBody);
+
+    // ── TOY BUGGY VISUALS ────────────────────────────────────────────────────
+    const carGroup = new THREE.Group();
+    scene.add(carGroup);
+
+    const buggyColor = theme === 'dark' ? 0xff6b6b : 0xe03131; // deep vibrant red
+    const bodyVisual = new THREE.MeshStandardMaterial({ color: buggyColor, roughness: 0.2, metalness: 0.1 });
+    const darkVisual = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
+    const lightVisual = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffee, emissiveIntensity: 1.0 });
+    const rimVisual = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+
+    // Main Chassis
+    const mainBodyMesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.4, 2.4), bodyVisual);
+    mainBodyMesh.position.y = 0.6;
+    mainBodyMesh.castShadow = true;
+    mainBodyMesh.receiveShadow = true;
+    carGroup.add(mainBodyMesh);
+
+    // Cabin
+    const topBody = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 1.2), darkVisual);
+    topBody.position.set(0, 1.05, 0.1);
+    topBody.castShadow = true;
+    carGroup.add(topBody);
+
+    // Front Bumper
+    const bumper = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 1.4, 16), darkVisual);
+    bumper.rotation.z = Math.PI / 2;
+    bumper.position.set(0, 0.5, -1.25);
+    bumper.castShadow = true;
+    carGroup.add(bumper);
+
+    // Headlights
+    const hL = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.15, 0.05), lightVisual);
+    hL.position.set(-0.4, 0.6, -1.22);
+    carGroup.add(hL);
+    const hR = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.15, 0.05), lightVisual);
+    hR.position.set(0.4, 0.6, -1.22);
+    carGroup.add(hR);
+
+    // Wheels
+    const wheelGroups = [];
+    const wheelOffsets = [
+      [-0.75, -0.25, -0.9], // Front Left
+      [0.75, -0.25, -0.9],  // Front Right
+      [-0.75, -0.25, 0.9],  // Rear Left
+      [0.75, -0.25, 0.9]   // Rear Right
+    ];
+
+    wheelOffsets.forEach(([x, y, z]) => {
+      const wg = new THREE.Group();
+      wg.position.set(x, y, z);
+      
+      const wheelSpinGroup = new THREE.Group();
+      wg.add(wheelSpinGroup);
+
+      // Tire
+      const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.25, 24), darkVisual);
+      tire.rotation.z = Math.PI / 2;
+      tire.castShadow = true;
+      tire.receiveShadow = true;
+      wheelSpinGroup.add(tire);
+      
+      // Hubcap
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.27, 16), rimVisual);
+      hub.rotation.z = Math.PI / 2;
+      wheelSpinGroup.add(hub);
+
+      carGroup.add(wg);
+      wheelGroups.push({ group: wg, spinGroup: wheelSpinGroup, isFront: z < 0 });
+    });
+
+    // ── CONTROLS ────────────────────────────────────────────────────────────
+    const keys = {};
+    const onKey = e => { 
+      if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
+        if(e.target === document.body) e.preventDefault();
+      }
+      keys[e.code] = e.type === 'keydown'; 
     };
-    window.addEventListener('scroll', onScroll);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKey);
 
+    let carYaw = 0;
+    const visualNormal = new THREE.Vector3(0, 1, 0);
+    const camTarget = new THREE.Vector3();
+
+    // Autopilot for testing/demo (press T to toggle)
+    let testAutoDrive = false;
+    window.addEventListener('keydown', e => {
+      if (e.code === 'KeyT') {
+        testAutoDrive = !testAutoDrive;
+        if (!testAutoDrive) {
+          keys['KeyW'] = false;
+          keys['KeyS'] = false;
+          keys['Space'] = false;
+          keys['ArrowUp'] = false;
+          keys['ArrowDown'] = false;
+        }
+        console.log("Autopilot toggled:", testAutoDrive);
+      }
+    });
+
+    // Intersection Observer
+    let isVisible = true;
+    const observer = new IntersectionObserver((entries) => {
+      isVisible = entries[0].isIntersecting;
+    });
+    observer.observe(container);
+
+    // ── ANIMATION LOOP ───────────────────────────────────────────────────────
     let reqId;
-    let time = 0;
+    const clock = new THREE.Clock();
+    const fixedStep = 1 / 60;
+    let accumulated = 0;
+
     function animate() {
       reqId = requestAnimationFrame(animate);
-      time += 0.01;
+      if (!isVisible) return;
+      const delta = Math.min(clock.getDelta(), 0.1);
+      accumulated += delta;
 
-      // Animations
-      coreMesh.rotation.y = time * 0.2;
-      coreMesh.rotation.x = time * 0.1;
+      if (testAutoDrive) {
+        // Target: Experience zone at (0, -35)
+        const dx = 0 - chassisBody.position.x;
+        const dz = -35 - chassisBody.position.z;
+        const dist = Math.sqrt(dx*dx + dz*dz);
+        if (dist > 3.0) {
+          keys['KeyW'] = true;
+          keys['Space'] = false;
+        } else {
+          keys['KeyW'] = false;
+          keys['Space'] = true;
+        }
+      }
 
-      sphereMesh.rotation.y = time * -0.1;
-      
-      screen1.position.y = Math.sin(time) * 0.5;
-      screen2.position.y = -3 + Math.sin(time + Math.PI) * 0.5;
+      const velocity = chassisBody.velocity;
 
-      portalMesh.rotation.z = time * 0.5;
+      while (accumulated >= fixedStep) {
+        // Ground checking
+        let isOnGround = false;
+        const groundNormal = new CANNON.Vec3(0, 1, 0);
 
-      // Move camera based on scroll
-      const documentHeight = document.documentElement.scrollHeight - window.innerHeight;
-      const scrollPercent = documentHeight > 0 ? scrollY / documentHeight : 0;
-      
-      // We have 5 stations spanning z=0 to z=-200. Max target = -200.
-      const targetZ = 5 - (scrollPercent * 205); 
-      
-      camera.position.z += (targetZ - camera.position.z) * 0.1;
-      
-      // Parallax mouse effect
-      camera.position.x += (mouseX * 5 - camera.position.x) * 0.05;
-      camera.position.y += (-mouseY * 5 - camera.position.y) * 0.05;
-      
-      // Subtle tilt
-      camera.rotation.z = mouseX * 0.1 + Math.sin(time * 0.5) * 0.02;
+        for (let i = 0; i < world.contacts.length; i++) {
+          const contact = world.contacts[i];
+          if (contact.bi === chassisBody || contact.bj === chassisBody) {
+            const normal = contact.bi === chassisBody ? contact.ni.negate() : contact.ni;
+            if (normal.y > 0.5) {
+              groundNormal.copy(normal);
+              isOnGround = true;
+            }
+          }
+        }
 
-      colorLight.position.z = camera.position.z - 5;
-      colorLight.position.x = Math.sin(time) * 10;
-      colorLight.position.y = Math.cos(time) * 10;
+        // Steer inputs change carYaw
+        let steerInput = 0;
+        if (keys['ArrowLeft'] || keys['KeyA']) steerInput = 1;
+        else if (keys['ArrowRight'] || keys['KeyD']) steerInput = -1;
+
+        // Steering rotation scale with velocity (so we don't turn instantly when completely stopped, but still can wiggle)
+        const speed = chassisBody.velocity.length();
+        const steerScale = speed < 1.0 ? 0.5 + 0.5 * speed : 1.0;
+        const STEER_SPEED = 3.5;
+        carYaw += steerInput * STEER_SPEED * steerScale * fixedStep;
+
+        // Calculate forward direction on horizontal plane
+        const forwardX = -Math.sin(carYaw);
+        const forwardZ = -Math.cos(carYaw);
+
+        // Project onto ground normal to get sloped forward vector
+        let fwdX = forwardX;
+        let fwdY = 0;
+        let fwdZ = forwardZ;
+
+        if (isOnGround) {
+          const dot = forwardX * groundNormal.x + forwardZ * groundNormal.z;
+          fwdX = forwardX - groundNormal.x * dot;
+          fwdY = -groundNormal.y * dot;
+          fwdZ = forwardZ - groundNormal.z * dot;
+          
+          const len = Math.sqrt(fwdX*fwdX + fwdY*fwdY + fwdZ*fwdZ);
+          if (len > 0.0001) {
+            fwdX /= len;
+            fwdY /= len;
+            fwdZ /= len;
+          }
+        }
+
+        // Right vector (horizontal perpendicular)
+        const rightX = -forwardZ;
+        const rightZ = forwardX;
+
+        // Current speed in sloped forward direction
+        const currentSpeed = chassisBody.velocity.x * fwdX + chassisBody.velocity.y * fwdY + chassisBody.velocity.z * fwdZ;
+
+        // Acceleration and braking
+        let targetSpeed = 0;
+        let accelRate = 0;
+
+        const MAX_SPEED = 22.0;       // Max forward speed
+        const MAX_REVERSE = 10.0;     // Max reverse speed
+        const ACCEL = 40.0;           // Snappy acceleration
+        const DECEL = 15.0;           // Smooth rolling resistance
+        const BRAKE = 60.0;           // Hard brakes
+
+        if (keys['ArrowUp'] || keys['KeyW']) {
+          targetSpeed = MAX_SPEED;
+          accelRate = ACCEL;
+        } else if (keys['ArrowDown'] || keys['KeyS']) {
+          targetSpeed = -MAX_REVERSE;
+          accelRate = ACCEL;
+        } else {
+          targetSpeed = 0;
+          accelRate = DECEL;
+        }
+
+        if (keys['Space']) {
+          targetSpeed = 0;
+          accelRate = BRAKE;
+        }
+
+        // Interpolate forward speed
+        const speedDiff = targetSpeed - currentSpeed;
+        const newSpeed = currentSpeed + speedDiff * accelRate * fixedStep;
+
+        // Apply new speed along sloped forward direction
+        chassisBody.velocity.x = fwdX * newSpeed;
+        if (isOnGround) {
+          chassisBody.velocity.y = fwdY * newSpeed;
+        }
+        chassisBody.velocity.z = fwdZ * newSpeed;
+
+        // Damp lateral velocity (grip)
+        const lateralSpeed = chassisBody.velocity.x * rightX + chassisBody.velocity.z * rightZ;
+        const GRIP = 0.93; // 93% lateral velocity damped per step
+        chassisBody.velocity.x -= rightX * lateralSpeed * GRIP;
+        chassisBody.velocity.z -= rightZ * lateralSpeed * GRIP;
+
+        world.fixedStep(fixedStep);
+        accumulated -= fixedStep;
+      }
+
+      // Find ground normal for visuals
+      let isOnGround = false;
+      const groundNormal = new CANNON.Vec3(0, 1, 0);
+      for (let i = 0; i < world.contacts.length; i++) {
+        const contact = world.contacts[i];
+        if (contact.bi === chassisBody || contact.bj === chassisBody) {
+          const normal = contact.bi === chassisBody ? contact.ni.negate() : contact.ni;
+          if (normal.y > 0.5) {
+            groundNormal.copy(normal);
+            isOnGround = true;
+          }
+        }
+      }
+
+      const targetNormal = isOnGround 
+        ? new THREE.Vector3(groundNormal.x, groundNormal.y, groundNormal.z).normalize() 
+        : new THREE.Vector3(0, 1, 0);
+
+      visualNormal.lerp(targetNormal, 0.1);
+
+      // Reconstruct target basis from visual normal and yaw
+      const fwdHorizontal = new THREE.Vector3(-Math.sin(carYaw), 0, -Math.cos(carYaw));
+      const dot = fwdHorizontal.dot(visualNormal);
+      const fwdSloped = new THREE.Vector3()
+        .copy(fwdHorizontal)
+        .sub(visualNormal.clone().multiplyScalar(dot))
+        .normalize();
+
+      const backward = fwdSloped.clone().negate().normalize();
+      const right = new THREE.Vector3().crossVectors(visualNormal, backward).normalize();
+      const up = new THREE.Vector3().crossVectors(backward, right).normalize();
+
+      const matrix = new THREE.Matrix4();
+      matrix.makeBasis(right, up, backward);
+      const targetQuat = new THREE.Quaternion().setFromRotationMatrix(matrix);
+
+      // Sync visuals
+      carGroup.position.copy(chassisBody.position);
+      carGroup.quaternion.slerp(targetQuat, 0.15);
+
+      // Roll and steering animations for wheels
+      let currentForwardSpeed = velocity.dot(fwdSloped);
+      if (Math.abs(currentForwardSpeed) < 0.05) currentForwardSpeed = 0;
+      const wheelRadius = 0.35;
+      const rollDelta = (currentForwardSpeed / wheelRadius) * delta;
+
+      wheelGroups.forEach(w => {
+        w.spinGroup.rotation.x += rollDelta;
+        if (w.isFront) {
+          let targetWheelSteer = 0;
+          if (keys['ArrowLeft'] || keys['KeyA']) targetWheelSteer = 0.4;
+          else if (keys['ArrowRight'] || keys['KeyD']) targetWheelSteer = -0.4;
+          w.group.rotation.y += (targetWheelSteer - w.group.rotation.y) * 0.2;
+        }
+      });
+
+      // Sync dynamic scenery/props
+      props.forEach(p => {
+        if(!p.static) {
+           p.mesh.position.copy(p.body.position);
+           const q = new THREE.Quaternion().copy(p.body.quaternion);
+           const fixQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), Math.PI/2);
+           p.mesh.quaternion.copy(q.multiply(fixQ));
+        }
+      });
+
+      // Zone Logic & Monument animations
+      zones.forEach(z => {
+         z.ring.rotation.z += 0.02;
+         z.ring.position.y = 1.5 + Math.sin(clock.elapsedTime * 2 + z.position.x) * 0.2;
+         if (z.monument) {
+             const targetScale = (activeZoneRef.current === z.id) ? 1.0 : 0.001;
+             z.monument.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.05);
+         }
+      });
+
+      // Calculate speed for HUD/zones (using local forward speed relative to visual heading)
+      const speedVal = velocity.dot(fwdSloped);
+      const speedKmh = Math.abs(speedVal) * 3.6;
+
+      let closestZone = null;
+      let minZoneDist = Infinity;
+      zones.forEach(z => {
+         const dx = z.position.x - chassisBody.position.x;
+         const dz = z.position.z - chassisBody.position.z;
+         const dist = Math.sqrt(dx*dx + dz*dz);
+         if (dist < minZoneDist) {
+            minZoneDist = dist;
+            if (dist < 3.5) {
+               closestZone = z.id;
+            }
+         }
+      });
+
+      // State machine for zone entry/exit with speed/distance hysteresis
+      if (activeZoneRef.current) {
+         const activeZoneObj = zones.find(z => z.id === activeZoneRef.current);
+         let shouldExit = true;
+         if (activeZoneObj) {
+            const dx = activeZoneObj.position.x - chassisBody.position.x;
+            const dz = activeZoneObj.position.z - chassisBody.position.z;
+            const dist = Math.sqrt(dx*dx + dz*dz);
+            // Remain in zone only if we are still close and haven't accelerated to high speed
+            if (dist < 4.0 && speedKmh < 5.0) {
+               shouldExit = false;
+            }
+         }
+         if (shouldExit) {
+            activeZoneRef.current = null;
+            window.dispatchEvent(new CustomEvent('zone-leave'));
+         }
+      } else {
+         // Enter zone if parked (speed < 1.0 km/h) inside the zone radius (< 3.5)
+         if (closestZone && speedKmh < 1.0) {
+            activeZoneRef.current = closestZone;
+            window.dispatchEvent(new CustomEvent('zone-enter', { detail: closestZone }));
+         }
+      }
+
+      // Camera Logic
+      if (activeZoneRef.current) {
+         // Area View Camera
+         const areaTarget = new THREE.Vector3().copy(chassisBody.position);
+         const areaOffset = new THREE.Vector3(-15, 20, 15); // High diagonal overhead view
+         const desiredCamPos = areaTarget.clone().add(areaOffset);
+         camera.position.lerp(desiredCamPos, 0.03); // Slower, cinematic pan
+         camTarget.lerp(areaTarget, 0.05);
+      } else {
+         // Chase Camera
+         const carPos = new THREE.Vector3().copy(chassisBody.position);
+         const offset = new THREE.Vector3(0, 6, 12).applyQuaternion(carGroup.quaternion);
+         const desiredCamPos = carPos.clone().add(offset);
+         camera.position.lerp(desiredCamPos, 0.08); // Snappier chase
+         camTarget.lerp(carPos, 0.15);
+      }
+      camera.lookAt(camTarget);
 
       renderer.render(scene, camera);
     }
     animate();
 
     const onResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
+      const w = container.clientWidth, h = container.clientHeight;
+      camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setSize(w, h);
     };
     window.addEventListener('resize', onResize);
-
-    setTimeout(() => {
-      if (container) {
-        container.style.opacity = '1';
-      }
-    }, 100);
+    setTimeout(() => { if (container) container.style.opacity = '1'; }, 200);
 
     return () => {
+      observer.disconnect();
       window.removeEventListener('resize', onResize);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKey);
       cancelAnimationFrame(reqId);
-      if (container && renderer.domElement) {
-        container.removeChild(renderer.domElement);
-      }
-      
-      // Cleanup
-      coreGeo.dispose(); coreMat.dispose();
-      sphereGeo.dispose(); sphereMat.dispose();
-      pillarGeo.dispose(); pillarMat.dispose();
-      screenGeo.dispose(); matHiresia.dispose(); matRapid.dispose();
-      portalGeo.dispose(); portalMat.dispose();
+      if (container && renderer.domElement) container.removeChild(renderer.domElement);
+      renderer.dispose();
     };
-  }, [prefersReducedMotion, theme]);
+  }, [prefersReducedMotion]); // Kept empty to prevent re-instantiation
 
   // Custom Cursor
   useEffect(() => {
@@ -230,11 +713,16 @@ function App() {
     let ringX = 0, ringY = 0;
     let requestRef;
 
+    let isMoving = false;
     const onMouseMove = (e) => {
       mouseX = e.clientX;
       mouseY = e.clientY;
       if (cursorDot) {
-        cursorDot.style.transform = `translate(calc(${mouseX}px - 50%), calc(${mouseY}px - 50%))`;
+        cursorDot.style.transform = `translate3d(calc(${mouseX}px - 50%), calc(${mouseY}px - 50%), 0)`;
+      }
+      if (!isMoving) {
+        isMoving = true;
+        requestRef = requestAnimationFrame(renderCursor);
       }
     };
 
@@ -242,13 +730,17 @@ function App() {
       ringX += (mouseX - ringX) * 0.12;
       ringY += (mouseY - ringY) * 0.12;
       if (cursorRing) {
-        cursorRing.style.transform = `translate(calc(${ringX}px - 50%), calc(${ringY}px - 50%))`;
+        cursorRing.style.transform = `translate3d(calc(${ringX}px - 50%), calc(${ringY}px - 50%), 0)`;
       }
-      requestRef = requestAnimationFrame(renderCursor);
+      
+      if (Math.abs(mouseX - ringX) > 0.1 || Math.abs(mouseY - ringY) > 0.1) {
+        requestRef = requestAnimationFrame(renderCursor);
+      } else {
+        isMoving = false;
+      }
     };
 
     window.addEventListener('mousemove', onMouseMove);
-    requestRef = requestAnimationFrame(renderCursor);
 
     const onMouseDown = () => document.body.classList.add('cursor-click');
     const onMouseUp = () => document.body.classList.remove('cursor-click');
@@ -373,166 +865,108 @@ function App() {
       </nav>
 
       <main>
-        <div id="canvas-container" ref={canvasContainerRef}></div>
         <section id="hero" className="hero-modern">
-          <div className="container hero-content reveal">
-            <div className="hero-badge">Available for opportunities</div>
-            <h1 className="hero-title">
-              Hi, I'm Hitesh.<br />
-              I build <span className="highlight">scalable systems</span><br/>
-              and craft <span className="highlight">seamless experiences.</span>
-            </h1>
-            <p className="hero-subtitle">Software Development Intern & Full-Stack Enthusiast</p>
-            <div className="hero-cta">
-              <InteractiveEl as="a" href="#work" className="btn-primary">View Projects</InteractiveEl>
-              <InteractiveEl as="a" href="#contact" className="btn-secondary">Contact Me</InteractiveEl>
-            </div>
-          </div>
-        </section>
-
-        <section id="about" className="container reveal">
-          <div className="about-grid">
-            <div className="about-quote"></div>
-            <div>
-              <p className="about-text">
-                I am a passionate software developer specializing in building production-ready mobile applications and investor-facing web platforms. My approach merges technical rigor with a relentless focus on creating seamless cross-platform experiences using React Native and the MERN stack.
-              </p>
-              <div className="skills-grid">
-                <div className="skill-col">
-                  <label>LANGUAGES & FRAMEWORKS</label>
-                  <p>JavaScript, React Native, React.js, Node.js, Express.js</p>
-                </div>
-                <div className="skill-col">
-                  <label>DATABASES & TOOLS</label>
-                  <p>MongoDB, MySQL, Git, Expo, Vercel, Postman, n8n</p>
-                </div>
-                <div className="skill-col">
-                  <label>CORE COMPETENCIES</label>
-                  <p>REST APIs, JWT Auth, Cross-Platform Dev, UI/UX</p>
-                </div>
+          <div id="canvas-container" ref={canvasContainerRef}></div>
+          
+          
+          {/* Bruno Simon Style HUD / Overlays */}
+          {activeZone && (
+            <div style={{
+              position: 'absolute', top: '0', right: '0', bottom: '0', width: '450px',
+              background: theme === 'dark' ? 'rgba(10, 10, 12, 0.85)' : 'rgba(255, 255, 255, 0.85)',
+              backdropFilter: 'blur(30px)', borderLeft: theme === 'dark' ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
+              color: theme === 'dark' ? '#fff' : '#000', zIndex: 100,
+              boxShadow: '-20px 0 40px rgba(0,0,0,0.3)',
+              padding: '60px 40px', overflowY: 'auto',
+              animation: 'slideInRight 0.6s cubic-bezier(0.16, 1, 0.3, 1)',
+              display: 'flex', flexDirection: 'column'
+            }}>
+              <style>{`
+                @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
+                .game-hud-scroll::-webkit-scrollbar { width: 6px; }
+                .game-hud-scroll::-webkit-scrollbar-track { background: transparent; }
+                .game-hud-scroll::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 10px; }
+              `}</style>
+              <div style={{ fontSize: '12px', fontWeight: 'bold', letterSpacing: '2px', color: '#8FAF8C', marginBottom: '16px' }}>
+                {activeZone === 'hiresia' || activeZone === 'rapidrescue' ? 'PROJECT UNLOCKED' : 'AREA UNLOCKED'}
               </div>
-            </div>
-          </div>
-        </section>
-
-        <section id="experience">
-          <div className="container">
-            <h2 className="section-title reveal">Experience</h2>
-            <div className="timeline">
+              <h2 style={{margin: '0 0 24px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>
+                {activeZone === 'hiresia' ? 'Hiresia ATS' : activeZone === 'rapidrescue' ? 'RapidRescueQ' : 'Experience & Skills'}
+              </h2>
               
-              <div className="timeline-item reveal" data-stagger="0">
-                <InteractiveEl className="timeline-card">
-                  <div className="card-year">Apr 2024–Present</div>
-                  <div className="card-role">Software Development Intern at Grade Capital</div>
-                  <div className="card-desc">Contributed to production-ready mobile apps and investor-facing web platforms using React Native and React.js. Managed end-to-end App Store deployments and integrated RESTful APIs for real-time data flow.</div>
-                </InteractiveEl>
-              </div>
-
-              <div className="timeline-item reveal" data-stagger="150">
-                <InteractiveEl className="timeline-card">
-                  <div className="card-year">Dec 2023–Apr 2024</div>
-                  <div className="card-role">Application Development Intern at Yzxx</div>
-                  <div className="card-desc">Designed and developed a cross-platform mobile application using React Native and Expo. Supported end-to-end App Store deployment and debugged critical production issues.</div>
-                </InteractiveEl>
-              </div>
-
-            </div>
-          </div>
-        </section>
-
-        {/* NEW SECTIONS: Case Studies and Testimonials */}
-        <section id="work">
-          <div className="container">
-            <h2 className="section-title reveal" style={{ textAlign: 'left', marginBottom: '48px' }}>Featured Case Studies</h2>
-            
-            <div className="projects-grid">
-              <div className="project-card reveal" data-stagger="0" onClick={() => setSelectedProject('hiresia')}>
-                <div className="project-info">
-                  <div className="work-tag">FULL STACK ATS</div>
-                  <h3 className="work-title">Hiresia</h3>
-                  <p className="about-text" style={{marginBottom: '24px'}}>A complete MERN-based Applicant Tracking System featuring analytics and role-based access.</p>
-                  <InteractiveEl as="button" className="work-cta" style={{background: 'none', border: 'none', borderBottom: '1px solid currentColor', cursor: 'pointer', fontFamily: 'inherit'}}>READ CASE STUDY &rarr;</InteractiveEl>
+              {activeZone === 'hiresia' && (
+                <div>
+                  <span style={{ display: 'inline-block', padding: '6px 12px', background: '#FF6B6B', color: '#fff', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>FULL STACK ATS</span>
+                  <p style={{lineHeight: '1.8', marginBottom: '24px', opacity: 0.8, fontSize: '15px'}}>A complete MERN-based Applicant Tracking System featuring advanced analytics, role-based access control, and seamless scheduling. Designed to handle hundreds of concurrent applications with zero downtime.</p>
+                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                     {['MongoDB', 'Express', 'React', 'Node.js', 'AWS'].map(tech => (
+                        <span key={tech} style={{ padding: '6px 12px', background: theme==='dark'?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
+                     ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="project-card reveal" data-stagger="150" onClick={() => setSelectedProject('rapidrescue')}>
-                <div className="project-info">
-                  <div className="work-tag">COORDINATION PLATFORM</div>
-                  <h3 className="work-title">RapidRescueQ</h3>
-                  <p className="about-text" style={{marginBottom: '24px'}}>A live camera-based emergency reporting and coordination platform for public reporters and NGOs.</p>
-                  <InteractiveEl as="button" className="work-cta" style={{background: 'none', border: 'none', borderBottom: '1px solid currentColor', cursor: 'pointer', fontFamily: 'inherit'}}>READ CASE STUDY &rarr;</InteractiveEl>
+              {activeZone === 'rapidrescue' && (
+                <div>
+                  <span style={{ display: 'inline-block', padding: '6px 12px', background: '#4CAF50', color: '#fff', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>COORDINATION PLATFORM</span>
+                  <p style={{lineHeight: '1.8', marginBottom: '24px', opacity: 0.8, fontSize: '15px'}}>A live camera-based emergency reporting and coordination platform for public reporters and NGOs. Utilizes WebRTC for live streaming and geolocation for immediate dispatch.</p>
+                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                     {['React Native', 'WebRTC', 'Socket.io', 'Node.js'].map(tech => (
+                        <span key={tech} style={{ padding: '6px 12px', background: theme==='dark'?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
+                     ))}
+                  </div>
                 </div>
+              )}
+
+              {(activeZone === 'experience' || activeZone === 'about') && (
+                <div className="game-hud-scroll" style={{ overflowY: 'auto', paddingRight: '10px' }}>
+                  <p style={{lineHeight: '1.8', marginBottom: '40px', opacity: 0.9, fontSize: '16px'}}>I am a passionate software developer specializing in building production-ready mobile applications and investor-facing web platforms.</p>
+                  
+                  <h3 style={{ fontSize: '18px', marginBottom: '16px', borderBottom: theme==='dark'?'1px solid rgba(255,255,255,0.1)':'1px solid rgba(0,0,0,0.1)', paddingBottom: '8px' }}>Experience</h3>
+                  
+                  <div style={{ marginBottom: '24px' }}>
+                    <div style={{ fontSize: '12px', opacity: 0.6, marginBottom: '4px', fontWeight: 'bold' }}>APR 2024 – PRESENT</div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '8px' }}>Software Dev Intern @ Grade Capital</div>
+                    <p style={{ fontSize: '14px', opacity: 0.8, lineHeight: '1.6' }}>Contributed to production-ready mobile apps and investor-facing web platforms using React Native and React.js.</p>
+                  </div>
+                  
+                  <div style={{ marginBottom: '40px' }}>
+                    <div style={{ fontSize: '12px', opacity: 0.6, marginBottom: '4px', fontWeight: 'bold' }}>DEC 2023 – APR 2024</div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '8px' }}>App Dev Intern @ Yzxx</div>
+                    <p style={{ fontSize: '14px', opacity: 0.8, lineHeight: '1.6' }}>Designed and developed a cross-platform mobile application using React Native and Expo.</p>
+                  </div>
+
+                  <h3 style={{ fontSize: '18px', marginBottom: '16px', borderBottom: theme==='dark'?'1px solid rgba(255,255,255,0.1)':'1px solid rgba(0,0,0,0.1)', paddingBottom: '8px' }}>Core Skills</h3>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                     {['JavaScript', 'React Native', 'React.js', 'Node.js', 'MongoDB', 'AWS', 'Expo'].map(tech => (
+                        <span key={tech} style={{ padding: '6px 12px', background: theme==='dark'?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
+                     ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{marginTop: 'auto', paddingTop: '40px', fontSize: '13px', opacity: 0.5, display: 'flex', alignItems: 'center', gap: '8px'}}>
+                 <span style={{background: theme === 'dark' ? '#333' : '#ddd', padding: '4px 8px', borderRadius: '4px', fontWeight: 'bold', color: theme==='dark'?'#fff':'#000'}}>W</span>
+                 Press W to drive away and exit
               </div>
             </div>
-          </div>
-        </section>
+          )}
 
-        <section id="testimonials" className="reveal">
-          <div className="container">
-            <h2 className="section-title" style={{ textAlign: 'left', marginBottom: '48px' }}>Recommendations</h2>
-            <div className="testimonial-grid">
-              <div className="testimonial-card">
-                <p className="testimonial-text">"Hitesh consistently demonstrated exceptional technical rigor and a keen eye for UI/UX during his time with us. He successfully led the deployment of multiple critical features to production."</p>
-                <div className="testimonial-author">Engineering Lead @ Grade Capital</div>
-              </div>
-              <div className="testimonial-card">
-                <p className="testimonial-text">"A dedicated and highly capable full-stack developer. Hitesh took complete ownership of our React Native app and streamlined the entire App Store release process independently."</p>
-                <div className="testimonial-author">Product Manager @ Yzxx</div>
-              </div>
-            </div>
+          <div style={{
+            position: 'absolute', bottom: '30px', left: '30px', zIndex: 10,
+            background: theme === 'dark' ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.4)',
+            backdropFilter: 'blur(8px)', padding: '16px 24px', borderRadius: '16px',
+            display: 'flex', gap: '20px', color: theme === 'dark' ? '#fff' : '#000',
+            border: theme === 'dark' ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.05)'
+          }}>
+            <div style={{textAlign: 'center'}}><div style={{fontWeight: 'bold', fontSize: '22px', fontFamily: '"Space Grotesk", sans-serif'}}>WASD</div><div style={{fontSize: '11px', opacity: 0.6, letterSpacing: '1px'}}>DRIVE</div></div>
+            <div style={{width: '1px', background: theme === 'dark' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)'}}></div>
+            <div style={{textAlign: 'center'}}><div style={{fontWeight: 'bold', fontSize: '22px', fontFamily: '"Space Grotesk", sans-serif'}}>SPACE</div><div style={{fontSize: '11px', opacity: 0.6, letterSpacing: '1px'}}>BRAKE</div></div>
           </div>
-        </section>
+          </section>
+  </main>
 
-        <section id="stack">
-          <div className="marquee-wrapper">
-            <InteractiveEl className="marquee">
-              <div className="marquee-content">
-                <div className="stack-item"><svg viewBox="0 0 24 24"><path d="M8 6l-6 6 6 6M16 6l6 6-6 6" /></svg> TypeScript</div>
-                <div className="stack-item"><svg viewBox="0 0 24 24"><path d="M17.5 19A4.5 4.5 0 0 0 18 10c-.5-4-4-6-8-5-3.5 1-5 4.5-5 8.5a4 4 0 0 0 4.5 7.5" /></svg> AWS</div>
-                <div className="stack-item"><svg viewBox="0 0 24 24"><circle cx="12" cy="4" r="2" /><circle cx="4" cy="12" r="2" /><circle cx="20" cy="12" r="2" /><circle cx="12" cy="20" r="2" /><path d="M10.6 5.4l-5.2 5.2M13.4 5.4l5.2 5.2M5.4 13.4l5.2 5.2M18.6 13.4l-5.2 5.2" /></svg> GraphQL</div>
-                <div className="stack-item"><svg viewBox="0 0 24 24"><rect x="10" y="3" width="4" height="4" /><rect x="4" y="17" width="4" height="4" /><rect x="16" y="17" width="4" height="4" /><path d="M12 7v5M12 12H6v5M12 12h6v5" /></svg> Node.js</div>
-                <div className="stack-item"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" ry="2" /><path d="M8 10l2 2-2 2M13 14h3" /></svg> React</div>
-                <div className="stack-item"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" /></svg> PostgreSQL</div>
-              </div>
-              <div className="marquee-content" aria-hidden="true">
-                <div className="stack-item"><svg viewBox="0 0 24 24"><path d="M8 6l-6 6 6 6M16 6l6 6-6 6" /></svg> TypeScript</div>
-                <div className="stack-item"><svg viewBox="0 0 24 24"><path d="M17.5 19A4.5 4.5 0 0 0 18 10c-.5-4-4-6-8-5-3.5 1-5 4.5-5 8.5a4 4 0 0 0 4.5 7.5" /></svg> AWS</div>
-                <div className="stack-item"><svg viewBox="0 0 24 24"><circle cx="12" cy="4" r="2" /><circle cx="4" cy="12" r="2" /><circle cx="20" cy="12" r="2" /><circle cx="12" cy="20" r="2" /><path d="M10.6 5.4l-5.2 5.2M13.4 5.4l5.2 5.2M5.4 13.4l5.2 5.2M18.6 13.4l-5.2 5.2" /></svg> GraphQL</div>
-                <div className="stack-item"><svg viewBox="0 0 24 24"><rect x="10" y="3" width="4" height="4" /><rect x="4" y="17" width="4" height="4" /><rect x="16" y="17" width="4" height="4" /><path d="M12 7v5M12 12H6v5M12 12h6v5" /></svg> Node.js</div>
-                <div className="stack-item"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" ry="2" /><path d="M8 10l2 2-2 2M13 14h3" /></svg> React</div>
-                <div className="stack-item"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" /></svg> PostgreSQL</div>
-              </div>
-            </InteractiveEl>
-          </div>
-        </section>
-
-        <section id="contact" className="reveal">
-          <div className="container">
-            <h2 className="contact-title">Let's Build Something</h2>
-            <InteractiveEl as="a" href="mailto:mhitesh059@gmail.com" className="contact-email">mhitesh059@gmail.com</InteractiveEl>
-            
-            <div className="socials">
-              <InteractiveEl as="a" href="https://github.com/Hiteshmehtaa" target="_blank" rel="noreferrer" className="social-link" aria-label="GitHub">
-                <svg viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
-              </InteractiveEl>
-              <InteractiveEl as="a" href="https://linkedin.com/in/hiteshmehta21" target="_blank" rel="noreferrer" className="social-link" aria-label="LinkedIn">
-                <svg viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
-              </InteractiveEl>
-            </div>
-          </div>
-        </section>
-
-      </main>
-
-      <footer>
-        <div className="container footer-inner">
-          <div className="footer-text">© 2024 HITESH MEHTA. DESIGNED & BUILT BY ME.</div>
-          <div className="footer-links">
-            <InteractiveEl as="a" href="https://github.com/Hiteshmehtaa" target="_blank" rel="noreferrer">GITHUB</InteractiveEl>
-            <InteractiveEl as="a" href="https://linkedin.com/in/hiteshmehta21" target="_blank" rel="noreferrer">LINKEDIN</InteractiveEl>
-          </div>
-        </div>
-      </footer>
+      
     </>
   );
 }
