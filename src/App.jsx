@@ -2,6 +2,88 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 
+
+function createCar(theme) {
+  const carGroup = new THREE.Group();
+  const bodyColor = theme === 'dark' ? 0xcc2200 : 0x1144ff;
+  const cabinColor = theme === 'dark' ? 0xe63900 : 0x3366ff;
+  const wheelColor = 0x111111;
+  const bodyMat  = new THREE.MeshToonMaterial({ color: bodyColor });
+  const cabinMat = new THREE.MeshToonMaterial({ color: cabinColor });
+  const wheelMat = new THREE.MeshToonMaterial({ color: wheelColor });
+  const headLightMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 2 });
+  const tailLightMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 2 });
+
+  // Chassis — slightly tapered at top via vertex manipulation
+  const chassisGeo = new THREE.BoxGeometry(1.4, 0.4, 2.8);
+  const posAttr = chassisGeo.attributes.position;
+  for (let i = 0; i < posAttr.count; i++) {
+    if (posAttr.getY(i) > 0) {
+      posAttr.setX(i, posAttr.getX(i) * (posAttr.getZ(i) > 0 ? 0.9 : 0.95));
+    }
+  }
+  chassisGeo.computeVertexNormals();
+  const chassisMesh = new THREE.Mesh(chassisGeo, bodyMat);
+  chassisMesh.position.y = 0.6; chassisMesh.castShadow = true; chassisMesh.receiveShadow = true;
+  carGroup.add(chassisMesh);
+
+  // Cabin — windshield slant baked via vertex offset
+  const cabinGeo = new THREE.BoxGeometry(1.0, 0.6, 1.4);
+  const cPos = cabinGeo.attributes.position;
+  for (let i = 0; i < cPos.count; i++) {
+    if (cPos.getY(i) > 0 && cPos.getZ(i) > 0) cPos.setZ(i, cPos.getZ(i) - 0.3);
+    if (cPos.getY(i) > 0) cPos.setX(i, cPos.getX(i) * 0.9);
+  }
+  cabinGeo.computeVertexNormals();
+  const cabinMesh = new THREE.Mesh(cabinGeo, cabinMat);
+  cabinMesh.position.set(0, 1.1, -0.2); cabinMesh.castShadow = true;
+  carGroup.add(cabinMesh);
+
+  // Headlights (front +Z)
+  [[-0.5, 1.4], [0.5, 1.4]].forEach(([x, z]) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.15, 0.1), headLightMat);
+    m.position.set(x, 0.65, z); carGroup.add(m);
+  });
+  // Tail lights (rear -Z)
+  [[-0.5, -1.4], [0.5, -1.4]].forEach(([x, z]) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.1, 0.1), tailLightMat);
+    m.position.set(x, 0.65, z); carGroup.add(m);
+  });
+
+  // Physics chassis
+  const chassisShape = new CANNON.Box(new CANNON.Vec3(0.7, 0.2, 1.4));
+  const chassisBody = new CANNON.Body({ mass: 150 });
+  chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.2, 0));
+  chassisBody.position.set(0, 1.5, 5);
+  chassisBody.linearDamping = 0.55;   // Prevents rolling forever
+  chassisBody.angularDamping = 0.65;  // Stabilizes yaw/pitch spin
+
+  const vehicle = new CANNON.RaycastVehicle({ chassisBody, indexRightAxis: 0, indexUpAxis: 1, indexForwardAxis: 2 });
+
+  const wheelOpts = {
+    radius: 0.4, directionLocal: new CANNON.Vec3(0, -1, 0),
+    suspensionStiffness: 50, suspensionRestLength: 0.3,
+    maxSuspensionForce: 100000, maxSuspensionTravel: 0.3,
+    dampingRelaxation: 2.3, dampingCompression: 4.5,
+    axleLocal: new CANNON.Vec3(-1, 0, 0), rollInfluence: 0.05,
+  };
+  vehicle.addWheel({ ...wheelOpts, frictionSlip: 3.5, chassisConnectionPointLocal: new CANNON.Vec3(-0.8, -0.1,  1.0) });
+  vehicle.addWheel({ ...wheelOpts, frictionSlip: 3.5, chassisConnectionPointLocal: new CANNON.Vec3( 0.8, -0.1,  1.0) });
+  vehicle.addWheel({ ...wheelOpts, frictionSlip: 4.0, chassisConnectionPointLocal: new CANNON.Vec3(-0.8, -0.1, -1.0) });
+  vehicle.addWheel({ ...wheelOpts, frictionSlip: 4.0, chassisConnectionPointLocal: new CANNON.Vec3( 0.8, -0.1, -1.0) });
+
+  // Visual wheel groups
+  const wheels = [];
+  for (let i = 0; i < 4; i++) {
+    const wg = new THREE.Group();
+    const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.3, 24), wheelMat);
+    tire.rotation.z = Math.PI / 2; tire.castShadow = true;
+    wg.add(tire); wheels.push(wg);
+  }
+
+  return { chassisBody, vehicle, carGroup, wheels };
+}
+
 const projectsData = {
   hiresia: {
     title: 'Hirevia',
@@ -133,12 +215,15 @@ function App() {
   const [scrolled, setScrolled] = useState(false);
   const [activeSection, setActiveSection] = useState('');
   const canvasContainerRef = useRef(null);
+  const minimapRef = useRef(null);
   
   // Platform Features State
   const [theme, setTheme] = useState('light');
   const [selectedProject, setSelectedProject] = useState(null);
   const [carHitItem, setCarHitItem] = useState(null);
   const [activeZone, setActiveZone] = useState(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(0);
 
   useEffect(() => {
     document.body.className = theme === 'dark' ? 'dark-theme' : '';
@@ -172,6 +257,14 @@ function App() {
     if (prefersReducedMotion || !canvasContainerRef.current) return;
     const container = canvasContainerRef.current;
     while (container.firstChild) container.removeChild(container.firstChild);
+
+    // Simulated load progress
+    let _prog = 0;
+    const _loadInterval = setInterval(() => {
+      _prog += Math.random() * 18 + 4;
+      if (_prog >= 100) { _prog = 100; clearInterval(_loadInterval); }
+      setLoadProgress(Math.round(_prog));
+    }, 120);
 
     const W = container.clientWidth || window.innerWidth;
     const H = container.clientHeight || window.innerHeight;
@@ -441,151 +534,31 @@ function App() {
     createZone('stack',       40, -88,  0xff922b, stackMon);
     createZone('contact',      0, -108, 0xff6b6b, contactMon);
 
-    // ── TOY BUGGY PHYSICS (CANNON.RAYCASTVEHICLE) ───────────────────────────
-    const chassisShape = new CANNON.Box(new CANNON.Vec3(0.6, 0.25, 1.2)); // width/2, height/2, length/2
-    const chassisBody = new CANNON.Body({
-      mass: 120,
-      material: carMat,
-      linearDamping: 0.1,
-      angularDamping: 0.6
-    });
-    // Shift shape UP by 0.2 so the physical Center of Mass drops DOWN by 0.2
-    chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.2, 0));
-    chassisBody.position.set(0, 1.5, 5); // Start position
-    // NOTE: Do NOT call world.addBody(chassisBody) here — vehicle.addToWorld() does this
-
-    const vehicle = new CANNON.RaycastVehicle({
-      chassisBody: chassisBody,
-      indexRightAxis: 0,
-      indexUpAxis: 1,
-      indexForwardAxis: 2
-    });
-
-    const wheelOptions = {
-      radius: 0.35,
-      directionLocal: new CANNON.Vec3(0, -1, 0),
-      suspensionStiffness: 25,
-      suspensionRestLength: 0.4,
-      maxSuspensionForce: 100000,
-      maxSuspensionTravel: 0.35,
-      dampingRelaxation: 2.3,
-      dampingCompression: 4.4,
-      frictionSlip: 1.4,
-      axleLocal: new CANNON.Vec3(-1, 0, 0),
-      customSlidingRotationalSpeed: -30,
-      useCustomSlidingRotationalSpeed: true,
-      rollInfluence: 0.05
-    };
-
-    // Add 4 wheels — connection points relative to chassis center
-    vehicle.addWheel({
-      ...wheelOptions,
-      chassisConnectionPointLocal: new CANNON.Vec3(-0.7, -0.15, -0.85) // FL
-    });
-    vehicle.addWheel({
-      ...wheelOptions,
-      chassisConnectionPointLocal: new CANNON.Vec3(0.7, -0.15, -0.85)  // FR
-    });
-    vehicle.addWheel({
-      ...wheelOptions,
-      chassisConnectionPointLocal: new CANNON.Vec3(-0.7, -0.15, 0.85)  // RL
-    });
-    vehicle.addWheel({
-      ...wheelOptions,
-      chassisConnectionPointLocal: new CANNON.Vec3(0.7, -0.15, 0.85)   // RR
-    });
-
-    vehicle.addToWorld(world); // This also adds chassisBody to world
-
-    // ── TOY BUGGY VISUALS ────────────────────────────────────────────────────
-    const carGroup = new THREE.Group();
+    // ── BRUNO SIMON STYLE CAR ───────────────────────────────────────────────
+    const { chassisBody, vehicle, carGroup, wheels } = createCar(theme);
+    vehicle.addToWorld(world);
     scene.add(carGroup);
-
-    const buggyColor = theme === 'dark' ? 0xff6b6b : 0xe03131; // deep vibrant red
-    const bodyVisual = new THREE.MeshStandardMaterial({ color: buggyColor, roughness: 0.2, metalness: 0.1 });
-    const darkVisual = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
-    const headlightMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 2 });
-    const rimVisual = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
-
-    // Main Chassis
-    const mainBodyMesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.4, 2.4), bodyVisual);
-    mainBodyMesh.position.y = 0.6;
-    mainBodyMesh.castShadow = true;
-    mainBodyMesh.receiveShadow = true;
-    carGroup.add(mainBodyMesh);
-
-    // Cabin
-    const topBody = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 1.2), darkVisual);
-    topBody.position.set(0, 1.05, -0.1); // Shifted backwards
-    topBody.castShadow = true;
-    carGroup.add(topBody);
-
-    // Front Bumper
-    const bumper = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.2, 0.3), darkVisual);
-    bumper.position.set(0, 0.5, 1.25); // +Z is front
-    bumper.castShadow = true;
-    carGroup.add(bumper);
-
-    // Headlights
-    const hL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.1), headlightMat);
-    hL.position.set(-0.4, 0.6, 1.22); // +Z is front
-    carGroup.add(hL);
-    const hR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.1, 0.1), headlightMat);
-    hR.position.set(0.4, 0.6, 1.22); // +Z is front
-    carGroup.add(hR);
-
-    // Wheels
-    const wheelGroups = [];
-    const wheelOffsets = [
-      [-0.75, -0.25, 0.9],  // FL
-      [0.75, -0.25, 0.9],   // FR
-      [-0.75, -0.25, -0.9], // RL
-      [0.75, -0.25, -0.9]   // RR
-    ];
-
-    wheelOffsets.forEach(([x, y, z]) => {
-      const wg = new THREE.Group();
-      const wheelSpinGroup = new THREE.Group();
-      wg.add(wheelSpinGroup);
-
-      // Tire
-      const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.25, 24), darkVisual);
-      tire.rotation.z = Math.PI / 2;
-      tire.castShadow = true;
-      tire.receiveShadow = true;
-      wheelSpinGroup.add(tire);
-      
-      // Hubcap
-      const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.27, 16), rimVisual);
-      hub.rotation.z = Math.PI / 2;
-      wheelSpinGroup.add(hub);
-
-      scene.add(wg); // Added directly to scene to prevent double translation
-      wheelGroups.push({ group: wg, spinGroup: wheelSpinGroup, isFront: z > 0 });
-    });
+    wheels.forEach(w => scene.add(w));
 
     // ── CONTROLS ────────────────────────────────────────────────────────────
-    const keys = {};
-    let autopilotTarget = null;
-
-    const onKey = e => { 
-      // Avoid controlling the car when typing in input fields
-      if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') {
-        return;
-      }
+    const keys = { up: false, down: false, left: false, right: false, space: false, r: false };
+    const onKey = e => {
+      if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
       if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
-        if(e.target === document.body) e.preventDefault();
+        if (e.target === document.body) e.preventDefault();
       }
-      keys[e.code] = e.type === 'keydown'; 
-      
-      // Manual input cancels any autopilot target or test autopilot
-      if (e.type === 'keydown' && ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
-        autopilotTarget = null;
-        testAutoDrive = false;
-      }
+      const isDown = e.type === 'keydown';
+      if (e.code === 'KeyW' || e.code === 'ArrowUp')    keys.up    = isDown;
+      if (e.code === 'KeyS' || e.code === 'ArrowDown')  keys.down  = isDown;
+      if (e.code === 'KeyA' || e.code === 'ArrowLeft')  keys.left  = isDown;
+      if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.right = isDown;
+      if (e.code === 'Space')                            keys.space = isDown;
+      if (e.code === 'KeyR')                             keys.r     = isDown;
     };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKey);
+    let currentEngineForce = 0, steerVal = 0;
+    let autopilotTarget = null;
 
     const camTarget = new THREE.Vector3();
 
@@ -598,11 +571,11 @@ function App() {
       if (e.code === 'KeyT') {
         testAutoDrive = !testAutoDrive;
         if (!testAutoDrive) {
-          keys['KeyW'] = false;
-          keys['KeyS'] = false;
-          keys['Space'] = false;
-          keys['ArrowUp'] = false;
-          keys['ArrowDown'] = false;
+          keys.up = false;
+          keys.down = false;
+          keys.space = false;
+          keys.left = false;
+          keys.right = false;
         }
         console.log("Autopilot toggled:", testAutoDrive);
       }
@@ -642,9 +615,7 @@ function App() {
       const dt = delta;
 
       const hasManualInput = (
-        keys['KeyW'] || keys['KeyS'] || keys['KeyA'] || keys['KeyD'] ||
-        keys['ArrowUp'] || keys['ArrowDown'] || keys['ArrowLeft'] || keys['ArrowRight'] ||
-        keys['Space']
+        keys.up || keys.down || keys.left || keys.right || keys.space
       );
 
       if (hasManualInput) {
@@ -653,7 +624,7 @@ function App() {
       }
 
       // Physics Reset / Flip-recovery (Press R)
-      if (keys['KeyR']) {
+      if (keys.r) {
         chassisBody.position.y = Math.max(chassisBody.position.y, 0) + 2.5;
         chassisBody.velocity.set(0, 0, 0);
         chassisBody.angularVelocity.set(0, 0, 0);
@@ -665,32 +636,23 @@ function App() {
         ));
         const headingAngle = Math.atan2(fwd.x, fwd.z);
         chassisBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0,1,0), headingAngle);
-        keys['KeyR'] = false;
+        keys.r = false;
       }
 
-      const maxSteerVal = 0.5;
-      const maxForce = 240; // Slightly faster than before
-      const brakeForce = 40;
+      // ── ENGINE & STEERING CONTROL (Manual + Autopilot)
+      const maxEngineForce = 3500;
+      const speedVal = chassisBody.velocity.length();
+      const speedKmh = speedVal * 3.6;
+      const maxSteerVal = speedKmh > 60 ? Math.max(0.2, THREE.MathUtils.lerp(0.55, 0.2, (speedKmh - 60) / 60)) : 0.55;
 
-      let steerValue = 0;
-      let engineForce = 0;
-      let currentBrake = 0;
-
-      // Allow user to break out of autopilot instantly
-      if (autopilotTarget || testAutoDrive) {
-         if (keys['KeyW'] || keys['KeyS'] || keys['KeyA'] || keys['KeyD'] || keys['Space'] || 
-             keys['ArrowUp'] || keys['ArrowDown'] || keys['ArrowLeft'] || keys['ArrowRight']) {
-            autopilotTarget = null;
-            testAutoDrive = false;
-         }
-      }
+      let targetSteer = 0;
+      let brakeForce = 0;
 
       if (autopilotTarget) {
         const dx = autopilotTarget.x - chassisBody.position.x;
         const dz = autopilotTarget.z - chassisBody.position.z;
         const dist = Math.sqrt(dx*dx + dz*dz);
-        const speed = chassisBody.velocity.length();
-        const brakeDist = Math.max(3.5, speed * 0.8);
+        const brakeDist = Math.max(3.5, speedVal * 0.8);
 
         if (dist > brakeDist) {
           const targetAngle = Math.atan2(dx, dz);
@@ -703,104 +665,112 @@ function App() {
           let angleDiff = targetAngle - currentAngle;
           angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
 
-          steerValue = Math.max(-maxSteerVal, Math.min(maxSteerVal, angleDiff * 1.8));
-          engineForce = maxForce * 0.7;
-          currentBrake = 0;
+          targetSteer = Math.max(-maxSteerVal, Math.min(maxSteerVal, angleDiff * 1.8));
+          currentEngineForce = -maxEngineForce * 0.6; // Autopilot drives forward
+          brakeForce = 0;
         } else {
-          // Smooth brake
-          if (speed > 0.5) {
-             engineForce = 0;
-             currentBrake = brakeForce;
-             steerValue = 0;
+          // Smooth braking on target arrival
+          if (speedVal > 0.5) {
+             currentEngineForce = 0;
+             brakeForce = 40;
+             targetSteer = 0;
           } else {
-             engineForce = 0;
-             currentBrake = brakeForce;
+             currentEngineForce = 0;
+             brakeForce = 40;
              autopilotTarget = null;
-             keys['KeyW'] = false; keys['KeyS'] = false; keys['Space'] = false;
+             testAutoDrive = false;
           }
         }
       } else if (testAutoDrive) {
         const dx = 0 - chassisBody.position.x;
         const dz = -35 - chassisBody.position.z;
         const dist = Math.sqrt(dx*dx + dz*dz);
-        const speed = chassisBody.velocity.length();
-        const brakeDist = Math.max(3.5, speed * 0.8);
+        const brakeDist = Math.max(3.5, speedVal * 0.8);
 
         if (dist > brakeDist) {
           const targetAngle = Math.atan2(dx, dz);
-          const chassisQ2 = new THREE.Quaternion(
+          const chassisQ = new THREE.Quaternion(
             chassisBody.quaternion.x, chassisBody.quaternion.y,
             chassisBody.quaternion.z, chassisBody.quaternion.w
           );
-          const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(chassisQ2);
+          const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(chassisQ);
           const currentAngle = Math.atan2(forward.x, forward.z);
           let angleDiff = targetAngle - currentAngle;
           angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
 
-          steerValue = Math.max(-maxSteerVal, Math.min(maxSteerVal, angleDiff * 1.8));
-          engineForce = maxForce * 0.7;
-          currentBrake = 0;
+          targetSteer = Math.max(-maxSteerVal, Math.min(maxSteerVal, angleDiff * 1.8));
+          currentEngineForce = -maxEngineForce * 0.6;
+          brakeForce = 0;
         } else {
-          if (speed > 0.5) {
-             engineForce = 0;
-             currentBrake = brakeForce;
-             steerValue = 0;
+          if (speedVal > 0.5) {
+             currentEngineForce = 0;
+             brakeForce = 40;
+             targetSteer = 0;
           } else {
-             engineForce = 0;
-             currentBrake = brakeForce;
+             currentEngineForce = 0;
+             brakeForce = 40;
              testAutoDrive = false;
           }
         }
       } else {
-        // Manual steering
-        if (keys['ArrowLeft'] || keys['KeyA']) steerValue = -maxSteerVal;
-        else if (keys['ArrowRight'] || keys['KeyD']) steerValue = maxSteerVal;
-
-        // Manual engine force: Negative force drives forward (-Z)
-        if (keys['ArrowUp'] || keys['KeyW']) engineForce = -maxForce;
-        else if (keys['ArrowDown'] || keys['KeyS']) engineForce = maxForce;
-
-        if (keys['Space']) {
-           currentBrake = brakeForce;
-           engineForce = 0; // Cut throttle when braking
+        // Manual controls
+        if (keys.up)        currentEngineForce = -maxEngineForce;
+        else if (keys.down) currentEngineForce =  maxEngineForce;
+        else {
+          currentEngineForce *= 0.4; // Decays engine force rapidly
+          if (Math.abs(currentEngineForce) < 50) currentEngineForce = 0;
         }
+
+        targetSteer = keys.left ? maxSteerVal : keys.right ? -maxSteerVal : 0;
+
+        // Brakes detection
+        const _fq = new THREE.Quaternion(chassisBody.quaternion.x, chassisBody.quaternion.y, chassisBody.quaternion.z, chassisBody.quaternion.w);
+        const _fv = new THREE.Vector3(0, 0, 1).applyQuaternion(_fq);
+        const isReversing = chassisBody.velocity.dot(new CANNON.Vec3(_fv.x, _fv.y, _fv.z)) > 0.1;
+        
+        if (keys.down && !isReversing && speedKmh > 5) {
+          brakeForce = 45;
+        } else if (keys.up && isReversing && speedKmh > 5) {
+          brakeForce = 45;
+        } else if (keys.space) {
+          brakeForce = 80; // Heavy handbrake
+        } else if (!keys.up && !keys.down) {
+          // Automatic engine braking to stop coasting inertia instantly
+          brakeForce = 8.5;
+        }
+        
+        if (brakeForce > 0) currentEngineForce = 0;
       }
 
-      // Apply controls
-      vehicle.setSteeringValue(steerValue, 0);
-      vehicle.setSteeringValue(steerValue, 1);
-      vehicle.applyEngineForce(engineForce, 2);
-      vehicle.applyEngineForce(engineForce, 3);
-      for (let i = 0; i < 4; i++) {
-        vehicle.setBrake(currentBrake, i);
-      }
+      // Snappier steering response
+      steerVal += (targetSteer - steerVal) * 0.42;
 
-      // Step physics world — RaycastVehicle runs inside world.step() automatically
-      world.step(dt);
+      // Apply steering to front wheels
+      vehicle.setSteeringValue(steerVal, 0); 
+      vehicle.setSteeringValue(steerVal, 1);
+      
+      // Apply engine force to ALL FOUR wheels (All-Wheel-Drive) for instant torque
+      vehicle.applyEngineForce(currentEngineForce, 0);
+      vehicle.applyEngineForce(currentEngineForce, 1);
+      vehicle.applyEngineForce(currentEngineForce, 2);
+      vehicle.applyEngineForce(currentEngineForce, 3);
+      
+      // Apply brakes to all wheels
+      for (let i = 0; i < 4; i++) vehicle.setBrake(brakeForce, i);
 
-      // Sync visual chassis — explicitly copy CANNON quaternion xyzw to THREE
-      carGroup.position.set(
-        chassisBody.position.x,
-        chassisBody.position.y,
-        chassisBody.position.z
-      );
-      carGroup.quaternion.set(
-        chassisBody.quaternion.x,
-        chassisBody.quaternion.y,
-        chassisBody.quaternion.z,
-        chassisBody.quaternion.w
-      );
+      // Downforce
+      chassisBody.applyForce(new CANNON.Vec3(0, -speedVal * speedVal * 0.15, 0), new CANNON.Vec3(0, 0, 0));
 
-      // ── WHEEL VISUAL SYNC ────────────────────────────────────────────
-      // The tire mesh already has rotation.z = PI/2 locally (cylinder axis = X, disc faces ±X).
-      // The physics wheel quaternion encodes correct rolling + steering around the X axle.
-      // Just copy the quaternion directly — NO extra offset needed.
+      world.step(1 / 60, delta, 3);
+
+      // Sync chassis + wheels
+      carGroup.position.copy(chassisBody.position);
+      carGroup.quaternion.copy(chassisBody.quaternion);
       for (let i = 0; i < vehicle.wheelInfos.length; i++) {
         vehicle.updateWheelTransform(i);
         const t = vehicle.wheelInfos[i].worldTransform;
-        const wg = wheelGroups[i].group;
-        wg.position.set(t.position.x, t.position.y, t.position.z);
-        wg.quaternion.set(t.quaternion.x, t.quaternion.y, t.quaternion.z, t.quaternion.w);
+        wheels[i].position.copy(t.position);
+        wheels[i].quaternion.copy(t.quaternion);
       }
 
       // Sync dynamic props (pins)
@@ -834,10 +804,6 @@ function App() {
              }
          }
       });
-
-      // Calculate speed for HUD/zones (using actual velocity)
-      const speedVal = chassisBody.velocity.length();
-      const speedKmh = speedVal * 3.6;
 
       let closestZone = null;
       let minZoneDist = Infinity;
@@ -876,39 +842,164 @@ function App() {
          }
       }
 
-      // Camera Logic (Chase & Area Camera)
-      if (activeZoneRef.current) {
-         // Area View Camera
-         const areaTarget = new THREE.Vector3(
-           chassisBody.position.x, chassisBody.position.y, chassisBody.position.z
-         );
-         const areaOffset = new THREE.Vector3(-15, 20, 15);
-         const desiredCamPos = areaTarget.clone().add(areaOffset);
-         camera.position.lerp(desiredCamPos, 0.03);
-         camTarget.lerp(areaTarget, 0.05);
-      } else {
-         // Upright Chase Camera (No roll/pitch orientation tracking to avoid disorientation)
-         const cameraQ = new THREE.Quaternion(
-           chassisBody.quaternion.x, chassisBody.quaternion.y,
-           chassisBody.quaternion.z, chassisBody.quaternion.w
-         );
-         const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(cameraQ); // +Z is forward
-         const yaw = Math.atan2(forward.x, forward.z);
-         
-         const carPos = new THREE.Vector3(
-           chassisBody.position.x, chassisBody.position.y, chassisBody.position.z
-         );
-         const offset = new THREE.Vector3(0, 5, -11); // Offset behind the +Z facing car
-         offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-         
-         const desiredCamPos = carPos.clone().add(offset);
-         camera.position.lerp(desiredCamPos, 0.08);
-         camTarget.lerp(carPos, 0.15);
-      }
+      // Camera — lerp 0.05 pos / 0.1 lookAt, dynamic FOV, corner tilt
+      const camQ = new THREE.Quaternion(chassisBody.quaternion.x, chassisBody.quaternion.y, chassisBody.quaternion.z, chassisBody.quaternion.w);
+      const camFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(camQ);
+      const camYaw = Math.atan2(camFwd.x, camFwd.z);
+      const carPos = new THREE.Vector3().copy(chassisBody.position);
+      let distBehind = 6, targetFov = 45;
+      if (speedKmh > 60) { distBehind = THREE.MathUtils.lerp(6, 8, (speedKmh-60)/40); targetFov = THREE.MathUtils.lerp(45, 65, (speedKmh-60)/40); }
+      camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, 0.05); camera.updateProjectionMatrix();
+      const camOffset = new THREE.Vector3(0, 3, -distBehind).applyAxisAngle(new THREE.Vector3(0,1,0), camYaw);
+      camera.position.lerp(carPos.clone().add(camOffset), 0.05);
+      camTarget.lerp(carPos, 0.1);
       camera.lookAt(camTarget);
+      camera.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), steerVal * 2 * Math.PI / 180));
 
       renderer.render(scene, camera);
+
+      // ── MINIMAP DRAWING ───────────────────────────────────────────────────
+      const minimapCanvas = minimapRef.current;
+      if (minimapCanvas) {
+        const ctx = minimapCanvas.getContext('2d');
+        if (ctx) {
+          const width = minimapCanvas.width;
+          const height = minimapCanvas.height;
+          const cx = width / 2;
+          const cy = height / 2;
+          
+          ctx.clearRect(0, 0, width, height);
+
+          // Transparent glassmorphic-styled map background
+          ctx.fillStyle = theme === 'dark' ? 'rgba(15, 23, 42, 0.45)' : 'rgba(255, 255, 255, 0.45)';
+          ctx.beginPath();
+          ctx.arc(cx, cy, cx - 4, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Outer glowing indicator ring
+          ctx.strokeStyle = theme === 'dark' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(cx, cy, cx - 4, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Get car position and yaw
+          const carX = chassisBody.position.x;
+          const carZ = chassisBody.position.z;
+          
+          const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(chassisBody.quaternion);
+          const carYaw = Math.atan2(fwd.x, fwd.z);
+
+          // Map scale: 1 unit in 3D = 1.1 pixels on canvas
+          const mapScale = 1.1;
+
+          // Draw zones
+          zones.forEach(zone => {
+            const dx = zone.position.x - carX;
+            const dz = zone.position.z - carZ;
+            
+            // Rotate relative to car's yaw (so car's heading is UP)
+            const rx = dx * Math.cos(-carYaw) - dz * Math.sin(-carYaw);
+            const rz = dx * Math.sin(-carYaw) + dz * Math.cos(-carYaw);
+            
+            // Convert to screen coords (rz is forward/up, rx is right)
+            const screenX = cx + rx * mapScale;
+            const screenY = cy - rz * mapScale;
+            
+            const distFromCenter = Math.sqrt((screenX - cx) * (screenX - cx) + (screenY - cy) * (screenY - cy));
+            const maxRadius = cx - 12;
+
+            if (distFromCenter < maxRadius) {
+              // Draw zone dot
+              ctx.fillStyle = '#' + zone.ring.material.color.getHexString();
+              ctx.beginPath();
+              ctx.arc(screenX, screenY, 6, 0, Math.PI * 2);
+              ctx.fill();
+              
+              // Border around zone dot
+              ctx.strokeStyle = theme === 'dark' ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.8)';
+              ctx.lineWidth = 1.5;
+              ctx.stroke();
+
+              // Zone label text
+              ctx.fillStyle = theme === 'dark' ? '#ffffff' : '#1e293b';
+              ctx.font = 'bold 9px "Space Grotesk", sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              
+              const labelMap = {
+                hiresia: 'HI',
+                rapidrescue: 'RR',
+                about: 'AB',
+                experience: 'EX',
+                stack: 'ST',
+                contact: 'CO'
+              };
+              const label = labelMap[zone.id] || zone.id.substring(0, 2).toUpperCase();
+              ctx.fillText(label, screenX, screenY + 12);
+            } else {
+              // Draw off-screen indicator on the border
+              const angle = Math.atan2(screenY - cy, screenX - cx);
+              const borderX = cx + Math.cos(angle) * (cx - 8);
+              const borderY = cy + Math.sin(angle) * (cy - 8);
+              
+              ctx.fillStyle = '#' + zone.ring.material.color.getHexString();
+              ctx.beginPath();
+              ctx.arc(borderX, borderY, 4, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          });
+
+          // Draw the car (always in center of rotation map)
+          ctx.save();
+          ctx.translate(cx, cy);
+          
+          // Draw a small futuristic triangle arrow pointing UP (towards screen -Y)
+          ctx.shadowColor = theme === 'dark' ? '#66fcf1' : '#1144ff';
+          ctx.shadowBlur = 8;
+          ctx.fillStyle = theme === 'dark' ? '#66fcf1' : '#1144ff';
+          
+          ctx.beginPath();
+          ctx.moveTo(0, -8);  // Nose
+          ctx.lineTo(-6, 6);  // Left tail
+          ctx.lineTo(0, 2);   // Center rear
+          ctx.lineTo(6, 6);   // Right tail
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+
+          // Reset shadow
+          ctx.shadowBlur = 0;
+
+          // Draw compass labels (N, S, E, W) rotating around the car
+          ctx.fillStyle = theme === 'dark' ? 'rgba(255, 255, 255, 0.45)' : 'rgba(15, 23, 42, 0.5)';
+          ctx.font = '900 10px "Space Grotesk", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          const directions = [
+            { label: 'N', angle: -carYaw - Math.PI / 2 },
+            { label: 'E', angle: -carYaw },
+            { label: 'S', angle: -carYaw + Math.PI / 2 },
+            { label: 'W', angle: -carYaw + Math.PI }
+          ];
+
+          directions.forEach(dir => {
+            const labelX = cx + Math.cos(dir.angle) * (cx - 14);
+            const labelY = cy + Math.sin(dir.angle) * (cy - 14);
+            
+            // Draw N in red/cyan to highlight it
+            if (dir.label === 'N') {
+              ctx.fillStyle = theme === 'dark' ? '#ff6b6b' : '#ff2200';
+            } else {
+              ctx.fillStyle = theme === 'dark' ? 'rgba(255, 255, 255, 0.45)' : 'rgba(15, 23, 42, 0.5)';
+            }
+            ctx.fillText(dir.label, labelX, labelY);
+          });
+        }
+      }
     }
+    setTimeout(() => setIsLoaded(true), 400);
     animate();
 
     const onResize = () => {
@@ -1095,6 +1186,68 @@ function App() {
 
       <main>
         <section id="hero" className="hero-modern">
+
+          {/* ── Gamified Loader ─────────────────────────────────────────── */}
+          {!isLoaded && (
+            <div style={{
+              position: 'absolute', inset: 0, zIndex: 200,
+              background: 'linear-gradient(135deg, #0a0a0f 0%, #111827 50%, #0a0a0f 100%)',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              transition: 'opacity 0.8s ease',
+              opacity: loadProgress >= 100 && isLoaded ? 0 : 1,
+              pointerEvents: isLoaded ? 'none' : 'all',
+            }}>
+              <svg width="90" height="48" viewBox="0 0 90 48" style={{ marginBottom: '32px', filter: 'drop-shadow(0 0 20px #1144ff88)' }}>
+                <rect x="8" y="20" width="74" height="18" rx="5" fill="#1144ff"/>
+                <rect x="22" y="10" width="46" height="16" rx="4" fill="#3366ff"/>
+                <rect x="26" y="12" width="16" height="9" rx="2" fill="rgba(180,220,255,0.35)"/>
+                <rect x="48" y="12" width="16" height="9" rx="2" fill="rgba(180,220,255,0.35)"/>
+                <circle cx="22" cy="39" r="7" fill="#0a0a0f" stroke="#555" strokeWidth="2"/>
+                <circle cx="22" cy="39" r="3" fill="#888"/>
+                <circle cx="68" cy="39" r="7" fill="#0a0a0f" stroke="#555" strokeWidth="2"/>
+                <circle cx="68" cy="39" r="3" fill="#888"/>
+                <rect x="8" y="23" width="7" height="5" rx="1" fill="white" opacity="0.95"/>
+                <rect x="75" y="23" width="7" height="5" rx="1" fill="#ff2200" opacity="0.95"/>
+              </svg>
+
+              <div style={{ fontSize: '11px', letterSpacing: '6px', color: '#4dabf7', fontFamily: '"Space Grotesk", monospace', marginBottom: '10px', textTransform: 'uppercase' }}>
+                HITESH.DEV
+              </div>
+              <div style={{ fontSize: '30px', fontWeight: '800', color: '#fff', fontFamily: '"Space Grotesk", sans-serif', marginBottom: '8px', letterSpacing: '-1px' }}>
+                Loading World
+              </div>
+              <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace', marginBottom: '44px', height: '16px' }}>
+                {loadProgress < 30 ? '> Initializing physics engine...' : loadProgress < 60 ? '> Building environment...' : loadProgress < 90 ? '> Placing car on track...' : '> Starting engine... 🏎️'}
+              </div>
+
+              <div style={{ width: '300px', height: '3px', background: 'rgba(255,255,255,0.07)', borderRadius: '99px', overflow: 'hidden', marginBottom: '10px' }}>
+                <div style={{
+                  height: '100%', borderRadius: '99px',
+                  background: 'linear-gradient(90deg, #1144ff, #4dabf7, #66fcf1)',
+                  width: loadProgress + '%', transition: 'width 0.12s ease',
+                  boxShadow: '0 0 14px #4dabf7'
+                }}/>
+              </div>
+              <div style={{ fontFamily: 'monospace', fontSize: '13px', color: '#4dabf7', fontWeight: 'bold' }}>{loadProgress}%</div>
+
+              <div style={{ position: 'absolute', bottom: '36px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+                {[0,1,2].map(i => (
+                  <div key={i} style={{
+                    width: '7px', height: '7px', borderRadius: '50%',
+                    background: 'linear-gradient(135deg, #1144ff, #4dabf7)',
+                    animation: `loaderPulse 1.4s ease-in-out ${i * 0.22}s infinite`,
+                  }}/>
+                ))}
+              </div>
+              <style>{`
+                @keyframes loaderPulse {
+                  0%, 100% { opacity: 0.15; transform: scale(0.7); }
+                  50% { opacity: 1; transform: scale(1.3); box-shadow: 0 0 10px #4dabf7; }
+                }
+              `}</style>
+            </div>
+          )}
+
           <div id="canvas-container" ref={canvasContainerRef}></div>
           
           
@@ -1261,6 +1414,29 @@ function App() {
               </div>
             </div>
           )}
+
+          {/* Minimap HUD */}
+          <div style={{
+            position: 'absolute',
+            bottom: '125px',
+            left: '30px',
+            width: '160px',
+            height: '160px',
+            borderRadius: '50%',
+            background: theme === 'dark' ? 'rgba(15, 23, 42, 0.45)' : 'rgba(255, 255, 255, 0.45)',
+            backdropFilter: 'blur(10px)',
+            border: theme === 'dark' ? '2px solid rgba(255, 255, 255, 0.1)' : '2px solid rgba(0, 0, 0, 0.08)',
+            boxShadow: theme === 'dark' ? '0 8px 32px rgba(0, 0, 0, 0.5), inset 0 0 12px rgba(255,255,255,0.05)' : '0 8px 32px rgba(0, 0, 0, 0.15), inset 0 0 12px rgba(0,0,0,0.02)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
+            pointerEvents: 'none',
+            transition: 'opacity 0.5s ease',
+            opacity: isLoaded ? 1 : 0
+          }}>
+            <canvas ref={minimapRef} width="160" height="160" style={{ display: 'block' }} />
+          </div>
 
           <div style={{
             position: 'absolute', bottom: '30px', left: '30px', zIndex: 10,
