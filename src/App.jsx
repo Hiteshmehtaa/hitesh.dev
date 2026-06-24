@@ -50,10 +50,18 @@ function createCar(theme) {
     m.position.set(x, 0.65, z); carGroup.add(m);
   });
 
-  // Physics chassis
-  const chassisShape = new CANNON.Box(new CANNON.Vec3(0.7, 0.2, 1.4));
+  // Physics chassis - Z reduced to 1.0 (from 1.4) to prevent bumpers hitting the ground and flipping the car
+  const chassisShape = new CANNON.Box(new CANNON.Vec3(0.7, 0.2, 1.0));
   const chassisBody = new CANNON.Body({ mass: 150 });
   chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.2, 0));
+  
+  // Silver bullet for arcade physics: Artificially increase pitch and roll inertia to prevent flips
+  chassisBody.updateMassProperties();
+  chassisBody.inertia.x *= 10; 
+  chassisBody.inertia.z *= 10; 
+  chassisBody.invInertia.x = 1 / chassisBody.inertia.x;
+  chassisBody.invInertia.z = 1 / chassisBody.inertia.z;
+
   chassisBody.position.set(0, 1.5, 5);
   chassisBody.linearDamping = 0.55;   // Prevents rolling forever
   chassisBody.angularDamping = 0.65;  // Stabilizes yaw/pitch spin
@@ -62,10 +70,10 @@ function createCar(theme) {
 
   const wheelOpts = {
     radius: 0.4, directionLocal: new CANNON.Vec3(0, -1, 0),
-    suspensionStiffness: 50, suspensionRestLength: 0.3,
+    suspensionStiffness: 80, suspensionRestLength: 0.3,
     maxSuspensionForce: 100000, maxSuspensionTravel: 0.3,
-    dampingRelaxation: 2.3, dampingCompression: 4.5,
-    axleLocal: new CANNON.Vec3(-1, 0, 0), rollInfluence: 0.05,
+    dampingRelaxation: 8.0, dampingCompression: 10.0,
+    axleLocal: new CANNON.Vec3(-1, 0, 0), rollInfluence: 0.01,
   };
   vehicle.addWheel({ ...wheelOpts, frictionSlip: 3.5, chassisConnectionPointLocal: new CANNON.Vec3(-0.8, -0.1,  1.0) });
   vehicle.addWheel({ ...wheelOpts, frictionSlip: 3.5, chassisConnectionPointLocal: new CANNON.Vec3( 0.8, -0.1,  1.0) });
@@ -416,23 +424,42 @@ function App() {
     // Populate Environment
     addRamp(-5, -10, 0);
     addRamp(20, -15, Math.PI/2);
+    addRamp(-25, -25, -Math.PI/4);
+    addRamp(5, -45, Math.PI);
+    addRamp(30, -50, Math.PI/2);
 
-    // Zone positions — used to avoid placing trees too close
+    // Zone positions — closer together to keep the area compact
     const zonePositions = [
-      { x: -20, z: -25 },
-      { x: 22, z: -38 },
-      { x: -35, z: -55 },
-      { x: 8, z: -70 },
-      { x: 40, z: -88 },
-      { x: 0, z: -108 }
+      { x: -15, z: -20 },
+      { x: 18, z: -32 },
+      { x: -25, z: -45 },
+      { x: 10, z: -55 },
+      { x: 28, z: -68 },
+      { x: -5, z: -82 }
     ];
 
-    for(let i=0; i<25; i++) {
+    const addBlock = (x, z, ry) => {
+       const body = new CANNON.Body({ mass: 5 });
+       body.addShape(new CANNON.Box(new CANNON.Vec3(1, 1, 1)));
+       body.position.set(x, 1, z);
+       const q = new CANNON.Quaternion();
+       q.setFromAxisAngle(new CANNON.Vec3(0,1,0), ry);
+       body.quaternion.copy(q);
+       world.addBody(body);
+
+       const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), blockMat);
+       mesh.castShadow = true;
+       mesh.receiveShadow = true;
+       scene.add(mesh);
+       props.push({ body, mesh });
+    };
+
+    for(let i=0; i<65; i++) {
        let tx, tz;
        let ok = false;
        while(!ok) {
-         tx = (Math.random() - 0.5) * 110;
-         tz = (Math.random() - 0.5) * 110;
+         tx = (Math.random() - 0.5) * 80; // keep it within -40 to 40 x
+         tz = (Math.random() - 0.5) * 90 - 35; // from ~ -80 to 10 z
          
          // Don't place near start (0, 5)
          const distToStart = Math.sqrt(tx*tx + (tz-5)*(tz-5));
@@ -443,18 +470,24 @@ function App() {
          for (let j = 0; j < zonePositions.length; j++) {
            const z = zonePositions[j];
            const dist = Math.sqrt((tx-z.x)*(tx-z.x) + (tz-z.z)*(tz-z.z));
-           if (dist < 8) {
+           if (dist < 6.5) {
              tooClose = true;
              break;
            }
          }
          if (!tooClose) ok = true;
        }
-       addTree(tx, tz);
+       if (i % 6 === 0) {
+         addBlock(tx, tz, Math.random() * Math.PI);
+       } else {
+         addTree(tx, tz);
+       }
     }
 
-    // Set up pins
+    // Set up pins in multiple locations
     [[-10,-20], [-10.5,-20.5], [-9.5,-20.5], [-11,-21], [-10,-21], [-9,-21]].forEach(pos => addPin(pos[0], pos[1]));
+    [[15,-25], [15.5,-25.5], [14.5,-25.5], [16,-26], [15,-26], [14,-26]].forEach(pos => addPin(pos[0], pos[1]));
+    [[-15,-50], [-15.5,-50.5], [-14.5,-50.5], [-16,-51], [-15,-51], [-14,-51]].forEach(pos => addPin(pos[0], pos[1]));
 
     // Zone monuments — positioned near their respective zone pads
     const monMat1 = new THREE.MeshStandardMaterial({ color: 0xFF6B6B, roughness: 0.2, metalness: 0.8 });
@@ -463,7 +496,7 @@ function App() {
 
     const hMon = new THREE.Group();
     [0, 1.2, 2.4].forEach(y => { const srv = new THREE.Mesh(new THREE.BoxGeometry(3, 1, 3), monMat1); srv.position.y = y; srv.castShadow = true; hMon.add(srv); });
-    hMon.position.set(-20, 0.5, -25);
+    hMon.position.set(-15, 0.5, -20);
     hMon.scale.set(0.001, 0.001, 0.001);
     scene.add(hMon);
 
@@ -472,18 +505,18 @@ function App() {
     const dish = new THREE.Mesh(new THREE.SphereGeometry(1.5, 16, 16, 0, Math.PI), monMat2);
     dish.position.y = 1.5; dish.rotation.x = -Math.PI/4;
     rMon.add(base); rMon.add(dish);
-    rMon.position.set(22, 0.5, -38);
+    rMon.position.set(18, 0.5, -32);
     rMon.scale.set(0.001, 0.001, 0.001);
     scene.add(rMon);
 
     const aboutMon = new THREE.Mesh(new THREE.OctahedronGeometry(1.8, 0), monMat1);
-    aboutMon.position.set(-35, 2.0, -55);
+    aboutMon.position.set(-25, 2.0, -45);
     aboutMon.castShadow = true;
     aboutMon.scale.set(0.001, 0.001, 0.001);
     scene.add(aboutMon);
 
     const eMon = new THREE.Mesh(new THREE.BoxGeometry(4, 10, 4), monMat3);
-    eMon.position.set(8, 5, -70);
+    eMon.position.set(10, 5, -55);
     eMon.castShadow = true;
     eMon.scale.set(0.001, 0.001, 0.001);
     scene.add(eMon);
@@ -496,12 +529,12 @@ function App() {
       layer.castShadow = true;
       stackMon.add(layer);
     });
-    stackMon.position.set(40, 0.5, -88);
+    stackMon.position.set(28, 0.5, -68);
     stackMon.scale.set(0.001, 0.001, 0.001);
     scene.add(stackMon);
 
     const contactMon = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.3, 16, 32), monMat3);
-    contactMon.position.set(0, 2.0, -108);
+    contactMon.position.set(-5, 2.0, -82);
     contactMon.castShadow = true;
     contactMon.scale.set(0.001, 0.001, 0.001);
     scene.add(contactMon);
@@ -527,12 +560,12 @@ function App() {
     };
 
     // Zones — spread well apart so player needs to actually explore
-    createZone('hiresia',    -20, -25,  0x4dabf7, hMon);
-    createZone('rapidrescue', 22, -38,  0x38d9a9, rMon);
-    createZone('about',      -35, -55,  0xbe4bdb, aboutMon);
-    createZone('experience',   8, -70,  0xffd43b, eMon);
-    createZone('stack',       40, -88,  0xff922b, stackMon);
-    createZone('contact',      0, -108, 0xff6b6b, contactMon);
+    createZone('hiresia',    -15, -20,  0x4dabf7, hMon);
+    createZone('rapidrescue', 18, -32,  0x38d9a9, rMon);
+    createZone('about',      -25, -45,  0xbe4bdb, aboutMon);
+    createZone('experience',  10, -55,  0xffd43b, eMon);
+    createZone('stack',       28, -68,  0xff922b, stackMon);
+    createZone('contact',     -5, -82,  0xff6b6b, contactMon);
 
     // ── BRUNO SIMON STYLE CAR ───────────────────────────────────────────────
     const { chassisBody, vehicle, carGroup, wheels } = createCar(theme);
@@ -640,7 +673,7 @@ function App() {
       }
 
       // ── ENGINE & STEERING CONTROL (Manual + Autopilot)
-      const maxEngineForce = 3500;
+      const maxEngineForce = 800; // Reduced from 3500 to prevent wheelie/flipping
       const speedVal = chassisBody.velocity.length();
       const speedKmh = speedVal * 3.6;
       const maxSteerVal = speedKmh > 60 ? Math.max(0.2, THREE.MathUtils.lerp(0.55, 0.2, (speedKmh - 60) / 60)) : 0.55;
@@ -672,11 +705,11 @@ function App() {
           // Smooth braking on target arrival
           if (speedVal > 0.5) {
              currentEngineForce = 0;
-             brakeForce = 40;
+             brakeForce = 150;
              targetSteer = 0;
           } else {
              currentEngineForce = 0;
-             brakeForce = 40;
+             brakeForce = 150;
              autopilotTarget = null;
              testAutoDrive = false;
           }
@@ -704,19 +737,23 @@ function App() {
         } else {
           if (speedVal > 0.5) {
              currentEngineForce = 0;
-             brakeForce = 40;
+             brakeForce = 150;
              targetSteer = 0;
           } else {
              currentEngineForce = 0;
-             brakeForce = 40;
+             brakeForce = 150;
              testAutoDrive = false;
           }
         }
       } else {
         // Manual controls
-        if (keys.up)        currentEngineForce = -maxEngineForce;
-        else if (keys.down) currentEngineForce =  maxEngineForce;
-        else {
+        if (keys.up && keys.down) {
+          currentEngineForce = 0;
+        } else if (keys.up) {
+          currentEngineForce = -maxEngineForce;
+        } else if (keys.down) {
+          currentEngineForce =  maxEngineForce;
+        } else {
           currentEngineForce *= 0.4; // Decays engine force rapidly
           if (Math.abs(currentEngineForce) < 50) currentEngineForce = 0;
         }
@@ -726,12 +763,14 @@ function App() {
         // Brakes detection
         const _fq = new THREE.Quaternion(chassisBody.quaternion.x, chassisBody.quaternion.y, chassisBody.quaternion.z, chassisBody.quaternion.w);
         const _fv = new THREE.Vector3(0, 0, 1).applyQuaternion(_fq);
-        const isReversing = chassisBody.velocity.dot(new CANNON.Vec3(_fv.x, _fv.y, _fv.z)) > 0.1;
+        const forwardSpeed = chassisBody.velocity.dot(new CANNON.Vec3(_fv.x, _fv.y, _fv.z));
         
-        if (keys.down && !isReversing && speedKmh > 5) {
-          brakeForce = 45;
-        } else if (keys.up && isReversing && speedKmh > 5) {
-          brakeForce = 45;
+        if (keys.up && keys.down) {
+          brakeForce = 100;
+        } else if (keys.down && forwardSpeed > 0.2) {
+          brakeForce = 100;
+        } else if (keys.up && forwardSpeed < -0.2) {
+          brakeForce = 100;
         } else if (keys.space) {
           brakeForce = 80; // Heavy handbrake
         } else if (!keys.up && !keys.down) {
@@ -742,8 +781,8 @@ function App() {
         if (brakeForce > 0) currentEngineForce = 0;
       }
 
-      // Snappier steering response
-      steerVal += (targetSteer - steerVal) * 0.42;
+      // Snappier steering response, frame-rate independent
+      steerVal += (targetSteer - steerVal) * (1.0 - Math.exp(-33.0 * delta));
 
       // Apply steering to front wheels
       vehicle.setSteeringValue(steerVal, 0); 
@@ -764,8 +803,8 @@ function App() {
       world.step(1 / 60, delta, 3);
 
       // Sync chassis + wheels
-      carGroup.position.copy(chassisBody.position);
-      carGroup.quaternion.copy(chassisBody.quaternion);
+      carGroup.position.copy(chassisBody.interpolatedPosition);
+      carGroup.quaternion.copy(chassisBody.interpolatedQuaternion);
       for (let i = 0; i < vehicle.wheelInfos.length; i++) {
         vehicle.updateWheelTransform(i);
         const t = vehicle.wheelInfos[i].worldTransform;
@@ -842,17 +881,22 @@ function App() {
          }
       }
 
-      // Camera — lerp 0.05 pos / 0.1 lookAt, dynamic FOV, corner tilt
-      const camQ = new THREE.Quaternion(chassisBody.quaternion.x, chassisBody.quaternion.y, chassisBody.quaternion.z, chassisBody.quaternion.w);
+      // Camera — frame-rate independent lerp using delta, use interpolated state to avoid stutter
+      const interpQ = chassisBody.interpolatedQuaternion;
+      const camQ = new THREE.Quaternion(interpQ.x, interpQ.y, interpQ.z, interpQ.w);
       const camFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(camQ);
       const camYaw = Math.atan2(camFwd.x, camFwd.z);
-      const carPos = new THREE.Vector3().copy(chassisBody.position);
+      const carPos = new THREE.Vector3().copy(chassisBody.interpolatedPosition);
       let distBehind = 6, targetFov = 45;
       if (speedKmh > 60) { distBehind = THREE.MathUtils.lerp(6, 8, (speedKmh-60)/40); targetFov = THREE.MathUtils.lerp(45, 65, (speedKmh-60)/40); }
-      camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, 0.05); camera.updateProjectionMatrix();
+      
+      const lerpFactorFast = 1.0 - Math.exp(-6.0 * delta);
+      const lerpFactorSlow = 1.0 - Math.exp(-3.0 * delta);
+
+      camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, lerpFactorSlow); camera.updateProjectionMatrix();
       const camOffset = new THREE.Vector3(0, 3, -distBehind).applyAxisAngle(new THREE.Vector3(0,1,0), camYaw);
-      camera.position.lerp(carPos.clone().add(camOffset), 0.05);
-      camTarget.lerp(carPos, 0.1);
+      camera.position.lerp(carPos.clone().add(camOffset), lerpFactorSlow);
+      camTarget.lerp(carPos, lerpFactorFast);
       camera.lookAt(camTarget);
       camera.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), steerVal * 2 * Math.PI / 180));
 
@@ -884,10 +928,10 @@ function App() {
           ctx.stroke();
 
           // Get car position and yaw
-          const carX = chassisBody.position.x;
-          const carZ = chassisBody.position.z;
+          const carX = chassisBody.interpolatedPosition.x;
+          const carZ = chassisBody.interpolatedPosition.z;
           
-          const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(chassisBody.quaternion);
+          const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(chassisBody.interpolatedQuaternion);
           const carYaw = Math.atan2(fwd.x, fwd.z);
 
           // Map scale: 1 unit in 3D = 1.1 pixels on canvas
