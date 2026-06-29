@@ -52,33 +52,28 @@ function createCar(theme) {
 
   // Physics chassis - Z reduced to 1.0 (from 1.4) to prevent bumpers hitting the ground and flipping the car
   const chassisShape = new CANNON.Box(new CANNON.Vec3(0.7, 0.2, 1.0));
-  const chassisBody = new CANNON.Body({ mass: 150 });
-  chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.2, 0));
   
-  // Silver bullet for arcade physics: Artificially increase pitch and roll inertia to prevent flips
-  chassisBody.updateMassProperties();
-  chassisBody.inertia.x *= 10; 
-  chassisBody.inertia.z *= 10; 
-  chassisBody.invInertia.x = 1 / chassisBody.inertia.x;
-  chassisBody.invInertia.z = 1 / chassisBody.inertia.z;
-
-  chassisBody.position.set(0, 1.5, 5);
-  chassisBody.linearDamping = 0.55;   // Prevents rolling forever
+  // --- PENDULUM CENTER OF MASS FIX ---
+  // This is the key to stability. We create a body with a low center of mass,
+  // and then add the chassis collision shape *above* it.
+  const chassisBody = new CANNON.Body({ mass: 150, position: new CANNON.Vec3(0, 1.0, 5) });
+  chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.7, 0)); // Shape is 0.7m ABOVE the center of mass
+  chassisBody.linearDamping = 0.55;
   chassisBody.angularDamping = 0.65;  // Stabilizes yaw/pitch spin
 
   const vehicle = new CANNON.RaycastVehicle({ chassisBody, indexRightAxis: 0, indexUpAxis: 1, indexForwardAxis: 2 });
 
   const wheelOpts = {
     radius: 0.4, directionLocal: new CANNON.Vec3(0, -1, 0),
-    suspensionStiffness: 80, suspensionRestLength: 0.3,
+    suspensionStiffness: 60, suspensionRestLength: 0.3,
     maxSuspensionForce: 100000, maxSuspensionTravel: 0.3,
     dampingRelaxation: 8.0, dampingCompression: 10.0,
     axleLocal: new CANNON.Vec3(-1, 0, 0), rollInfluence: 0.01,
   };
-  vehicle.addWheel({ ...wheelOpts, frictionSlip: 3.5, chassisConnectionPointLocal: new CANNON.Vec3(-0.8, -0.1,  1.0) });
-  vehicle.addWheel({ ...wheelOpts, frictionSlip: 3.5, chassisConnectionPointLocal: new CANNON.Vec3( 0.8, -0.1,  1.0) });
-  vehicle.addWheel({ ...wheelOpts, frictionSlip: 4.0, chassisConnectionPointLocal: new CANNON.Vec3(-0.8, -0.1, -1.0) });
-  vehicle.addWheel({ ...wheelOpts, frictionSlip: 4.0, chassisConnectionPointLocal: new CANNON.Vec3( 0.8, -0.1, -1.0) });
+  vehicle.addWheel({ ...wheelOpts, frictionSlip: 3.5, chassisConnectionPointLocal: new CANNON.Vec3(-0.8, 0.4,  1.0) });
+  vehicle.addWheel({ ...wheelOpts, frictionSlip: 3.5, chassisConnectionPointLocal: new CANNON.Vec3( 0.8, 0.4,  1.0) });
+  vehicle.addWheel({ ...wheelOpts, frictionSlip: 4.0, chassisConnectionPointLocal: new CANNON.Vec3(-0.8, 0.4, -1.0) });
+  vehicle.addWheel({ ...wheelOpts, frictionSlip: 4.0, chassisConnectionPointLocal: new CANNON.Vec3( 0.8, 0.4, -1.0) });
 
   // Visual wheel groups
   const wheels = [];
@@ -296,7 +291,7 @@ function App() {
     const sun = new THREE.DirectionalLight(0xfff5e6, theme === 'dark' ? 1.0 : 1.5);
     sun.position.set(30, 50, 30);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(4096, 4096); // High res shadows
+    sun.shadow.mapSize.set(2048, 2048); // Optimized shadow map size for performance
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 150;
     sun.shadow.camera.left = sun.shadow.camera.bottom = -60;
@@ -341,68 +336,128 @@ function App() {
 
     // ── SCENERY & PROPS ──────────────────────────────────────────────────────
     const props = [];
-    const blockMat = new THREE.MeshStandardMaterial({ color: 0xffa8a8, roughness: 0.4 });
-    const woodMat = new THREE.MeshStandardMaterial({ color: 0xc89666, roughness: 0.8 });
-    const treeMat = new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.9 });
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x795548, roughness: 0.9 });
-    const pinMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+    const windmills = [];
 
-    // Function to add a ramp
+    // Redesigned Cyber Launchpad Ramp
     const addRamp = (x, z, rotationY) => {
-       const w = 4, h = 1.5, d = 4;
-       
-       // Physics shape: wedge
-       const shape = new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2));
-       const body = new CANNON.Body({ mass: 0 }); // static
-       body.addShape(shape);
-       body.position.set(x, 0, z);
-       body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI/12); // Slanted
-       // Lower the ramp into the ground so there is no vertical lip
-       body.position.y = -0.55;
-       world.addBody(body);
+        const w = 4, h = 1.5, d = 4;
+        
+        // Physics shape: wedge
+        const shape = new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2));
+        const body = new CANNON.Body({ mass: 0 }); // static
+        body.addShape(shape);
+        body.position.set(x, 0, z);
+        body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI/12); // Slanted
+        body.position.y = -0.55;
+        world.addBody(body);
 
-       // We rotate the body locally, then apply rotationY
-       const euler = new CANNON.Vec3();
-       body.quaternion.toEuler(euler);
-       const qY = new CANNON.Quaternion();
-       qY.setFromAxisAngle(new CANNON.Vec3(0,1,0), rotationY);
-       body.quaternion = qY.mult(body.quaternion);
+        const euler = new CANNON.Vec3();
+        body.quaternion.toEuler(euler);
+        const qY = new CANNON.Quaternion();
+        qY.setFromAxisAngle(new CANNON.Vec3(0,1,0), rotationY);
+        body.quaternion = qY.mult(body.quaternion);
 
-       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat);
-       mesh.castShadow = true;
-       mesh.receiveShadow = true;
-       scene.add(mesh);
-       props.push({ body, mesh, static: true });
+        // Cyber launchpad mesh group
+        const rampGroup = new THREE.Group();
+        const metalMat = new THREE.MeshStandardMaterial({
+          color: theme === 'dark' ? 0x1f232a : 0xdbe1e8,
+          roughness: 0.5,
+          metalness: 0.8
+        });
+
+        const baseMesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), metalMat);
+        baseMesh.castShadow = true;
+        baseMesh.receiveShadow = true;
+        rampGroup.add(baseMesh);
+
+        // Glowing neon stripes on the ramp sides
+        const stripeMat = new THREE.MeshStandardMaterial({
+          color: 0xff5555, // Launch red/orange
+          emissive: 0xff5555,
+          emissiveIntensity: 1.2
+        });
+
+        const leftStripe = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.05, d), stripeMat);
+        leftStripe.position.set(-w/2 + 0.15, h/2 + 0.01, 0);
+        const rightStripe = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.05, d), stripeMat);
+        rightStripe.position.set(w/2 - 0.15, h/2 + 0.01, 0);
+        
+        baseMesh.add(leftStripe);
+        baseMesh.add(rightStripe);
+
+        rampGroup.position.copy(body.position);
+        rampGroup.quaternion.copy(body.quaternion);
+        scene.add(rampGroup);
+        // Static ramp positioned at start, no need to sync in animate loop
     };
 
-    // Add trees (Static cylinders and cones)
+    // Redesigned Stylized Cyber-Crystal Trees
     const addTree = (x, z) => {
-       const treeGroup = new THREE.Group();
-       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 1.5, 8), trunkMat);
-       trunk.position.y = 0.75;
-       trunk.castShadow = true;
-       treeGroup.add(trunk);
+       const crystalGroup = new THREE.Group();
        
-       const leaves = new THREE.Mesh(new THREE.ConeGeometry(1.5, 3, 8), treeMat);
-       leaves.position.y = 2.5;
-       leaves.castShadow = true;
-       
+       // Base rock
+       const base = new THREE.Mesh(
+         new THREE.DodecahedronGeometry(0.8, 0),
+         new THREE.MeshStandardMaterial({
+           color: theme === 'dark' ? 0x2d343f : 0x8c96a0,
+           roughness: 0.8,
+           flatShading: true
+         })
+       );
+       base.position.y = 0.3;
+       base.castShadow = true;
+       crystalGroup.add(base);
 
-       treeGroup.add(leaves);
-       treeGroup.position.set(x, 0, z);
-       scene.add(treeGroup);
+       // 3 Glowing crystal shards
+       const crystalGeo = new THREE.OctahedronGeometry(0.6, 0);
+       const colors = [0x38d9a9, 0x4dabf7, 0xbe4bdb];
+       const shardColor = colors[Math.floor(Math.random() * colors.length)];
+
+       const crystalMat = new THREE.MeshStandardMaterial({
+         color: shardColor,
+         emissive: shardColor,
+         emissiveIntensity: 0.6,
+         roughness: 0.1,
+         metalness: 0.9,
+         flatShading: true
+       });
+
+       // Main shard
+       const shard1 = new THREE.Mesh(crystalGeo, crystalMat);
+       shard1.position.set(0, 1.0, 0);
+       shard1.scale.set(0.6, 1.8, 0.6);
+       shard1.castShadow = true;
+       crystalGroup.add(shard1);
+
+       // Small side shards
+       const shard2 = new THREE.Mesh(crystalGeo, crystalMat);
+       shard2.position.set(0.35, 0.7, 0.25);
+       shard2.scale.set(0.4, 1.2, 0.4);
+       shard2.rotation.set(0.2, 0, -0.4);
+       shard2.castShadow = true;
+       crystalGroup.add(shard2);
+
+       const shard3 = new THREE.Mesh(crystalGeo, crystalMat);
+       shard3.position.set(-0.35, 0.6, -0.25);
+       shard3.scale.set(0.4, 1.0, 0.4);
+       shard3.rotation.set(-0.2, 0, 0.4);
+       shard3.castShadow = true;
+       crystalGroup.add(shard3);
+
+       crystalGroup.position.set(x, 0, z);
+       scene.add(crystalGroup);
        
+       // Static physics body for crystal cluster
        const body = new CANNON.Body({ mass: 0 });
-       body.addShape(new CANNON.Cylinder(0.4, 0.4, 1.5, 8));
+       body.addShape(new CANNON.Cylinder(0.8, 0.8, 1.5, 8));
        body.position.set(x, 0.75, z);
-       // Cannon cylinder needs rotation
        const q = new CANNON.Quaternion();
        q.setFromAxisAngle(new CANNON.Vec3(1,0,0), -Math.PI/2);
        body.quaternion.copy(q);
        world.addBody(body);
     };
 
-    // Add bowling pins (Dynamic)
+    // Redesigned High-Tech Energy Pin
     const addPin = (x, z) => {
        const body = new CANNON.Body({ mass: 1 });
        body.addShape(new CANNON.Cylinder(0.2, 0.2, 1.0, 8));
@@ -414,30 +469,32 @@ function App() {
        body.quaternion.copy(q);
        world.addBody(body);
 
-       const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.0, 16), pinMat);
+       // Glowing energy pin
+       const pinGroup = new THREE.Group();
+       const pinMatMain = new THREE.MeshStandardMaterial({
+         color: 0x66FCF1, // Cyan neon
+         emissive: 0x66FCF1,
+         emissiveIntensity: 0.8,
+         roughness: 0.1,
+         metalness: 0.9,
+         flatShading: true
+       });
+       
+       const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 1.0, 12), pinMatMain);
        mesh.castShadow = true;
        mesh.receiveShadow = true;
-       scene.add(mesh);
-       props.push({ body, mesh });
+       pinGroup.add(mesh);
+
+       const cap = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), pinMatMain);
+       cap.position.y = 0.5;
+       pinGroup.add(cap);
+
+       pinGroup.position.set(x, 1.0, z);
+       scene.add(pinGroup);
+       props.push({ body, mesh: pinGroup, isPin: true });
     };
 
-    // Populate Environment
-    addRamp(-5, -10, 0);
-    addRamp(20, -15, Math.PI/2);
-    addRamp(-25, -25, -Math.PI/4);
-    addRamp(5, -45, Math.PI);
-    addRamp(30, -50, Math.PI/2);
-
-    // Zone positions — closer together to keep the area compact
-    const zonePositions = [
-      { x: -15, z: -20 },
-      { x: 18, z: -32 },
-      { x: -25, z: -45 },
-      { x: 10, z: -55 },
-      { x: 28, z: -68 },
-      { x: -5, z: -82 }
-    ];
-
+    // Redesigned Glowing Energy Box/Crate
     const addBlock = (x, z, ry) => {
        const body = new CANNON.Body({ mass: 5 });
        body.addShape(new CANNON.Box(new CANNON.Vec3(1, 1, 1)));
@@ -447,25 +504,260 @@ function App() {
        body.quaternion.copy(q);
        world.addBody(body);
 
-       const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), blockMat);
-       mesh.castShadow = true;
-       mesh.receiveShadow = true;
-       scene.add(mesh);
-       props.push({ body, mesh });
+       // High-tech crate mesh group
+       const crateGroup = new THREE.Group();
+       
+       // Core box
+       const coreGeo = new THREE.BoxGeometry(1.8, 1.8, 1.8);
+       const coreMat = new THREE.MeshStandardMaterial({
+         color: theme === 'dark' ? 0x1a2130 : 0xe0e5ec,
+         roughness: 0.6,
+         metalness: 0.8
+       });
+       const core = new THREE.Mesh(coreGeo, coreMat);
+       core.castShadow = true;
+       core.receiveShadow = true;
+       crateGroup.add(core);
+
+       // Glowing energy bands on all sides
+       const glowColor = 0xff922b; // Energy orange
+       const glowMat = new THREE.MeshStandardMaterial({
+         color: glowColor,
+         emissive: glowColor,
+         emissiveIntensity: 1.2
+       });
+
+       const band1 = new THREE.Mesh(new THREE.BoxGeometry(2.02, 0.2, 0.2), glowMat);
+       const band2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2.02, 0.2), glowMat);
+       const band3 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 2.02), glowMat);
+       crateGroup.add(band1);
+       crateGroup.add(band2);
+       crateGroup.add(band3);
+
+       crateGroup.position.set(x, 1, z);
+       crateGroup.rotation.y = ry;
+       scene.add(crateGroup);
+       props.push({ body, mesh: crateGroup });
     };
 
+    // Redesigned Cliff/Rock Boundary
+    const addCliff = (x, z, scale) => {
+      const rockGeo = new THREE.DodecahedronGeometry(scale, 1);
+      // Elongate slightly vertically
+      const posAttr = rockGeo.attributes.position;
+      for (let i = 0; i < posAttr.count; i++) {
+         posAttr.setY(i, posAttr.getY(i) * 1.5);
+      }
+      rockGeo.computeVertexNormals();
+
+      const rockMat = new THREE.MeshStandardMaterial({
+        color: theme === 'dark' ? 0x1b2028 : 0xd2a477,
+        roughness: 0.95,
+        metalness: 0.05,
+        flatShading: true
+      });
+      const mesh = new THREE.Mesh(rockGeo, rockMat);
+      mesh.position.set(x, scale * 0.7 - 1.0, z); // Embed slightly
+      mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+
+      // Spherical static physics body
+      const body = new CANNON.Body({ mass: 0 });
+      body.addShape(new CANNON.Sphere(scale * 0.8));
+      body.position.set(x, scale * 0.7 - 1.0, z);
+      world.addBody(body);
+      // Static cliffs positioned at start, no need to sync in animate loop
+    };
+
+    // Redesigned Curved Launchpad Ramp (Wedge approximation)
+    const addCurvedRamp = (x, z, rotationY) => {
+       const segments = 6;
+       const width = 6;
+       const length = 10;
+       const rampGroup = new THREE.Group();
+
+       for (let i = 0; i < segments; i++) {
+         const angle = (i / (segments - 1)) * (Math.PI / 6); // Max angle 30 deg
+         const segmentLength = length / segments;
+         const h = 0.4;
+         
+         let z_local = 0;
+         let y_local = 0;
+         for (let j = 0; j < i; j++) {
+           const a = (j / (segments - 1)) * (Math.PI / 6);
+           z_local += segmentLength * Math.cos(a);
+           y_local += segmentLength * Math.sin(a);
+         }
+         const a_curr = (i / (segments - 1)) * (Math.PI / 6);
+         z_local += 0.5 * segmentLength * Math.cos(a_curr);
+         y_local += 0.5 * segmentLength * Math.sin(a_curr) - 0.2;
+
+         // Physics segment
+         const shape = new CANNON.Box(new CANNON.Vec3(width / 2, h / 2, segmentLength / 2));
+         const body = new CANNON.Body({ mass: 0 }); // static
+         body.addShape(shape);
+         
+         body.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), angle);
+         
+         const localPos = new THREE.Vector3(0, y_local, z_local);
+         localPos.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotationY);
+         body.position.set(x + localPos.x, localPos.y, z + localPos.z);
+         
+         const qY = new CANNON.Quaternion();
+         qY.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), rotationY);
+         body.quaternion = qY.mult(body.quaternion);
+         
+         world.addBody(body);
+
+         // Visual mesh
+         const metalMat = new THREE.MeshStandardMaterial({
+           color: theme === 'dark' ? 0x1f232a : 0xdbe1e8,
+           roughness: 0.5,
+           metalness: 0.8
+         });
+         const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, h, segmentLength), metalMat);
+         mesh.castShadow = true;
+         mesh.receiveShadow = true;
+         
+         const stripeMat = new THREE.MeshStandardMaterial({
+           color: 0x38d9a9, // Launch green stripes
+           emissive: 0x38d9a9,
+           emissiveIntensity: 1.2
+         });
+         const stripeL = new THREE.Mesh(new THREE.BoxGeometry(0.15, h + 0.02, segmentLength), stripeMat);
+         stripeL.position.set(-width/2 + 0.2, 0, 0);
+         const stripeR = new THREE.Mesh(new THREE.BoxGeometry(0.15, h + 0.02, segmentLength), stripeMat);
+         stripeR.position.set(width/2 - 0.2, 0, 0);
+         mesh.add(stripeL);
+         mesh.add(stripeR);
+
+         mesh.position.copy(body.position);
+         mesh.quaternion.copy(body.quaternion);
+         scene.add(mesh);
+       }
+    };
+
+    // Stunt jump ring
+    const addStuntRing = (x, y, z, rotationY) => {
+       const ringGeo = new THREE.TorusGeometry(3.5, 0.2, 16, 64);
+       const ringMat = new THREE.MeshStandardMaterial({
+         color: 0xff3b30, // Bright neon red
+         emissive: 0xff3b30,
+         emissiveIntensity: 1.5
+       });
+       const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+       ringMesh.position.set(x, y, z);
+       ringMesh.rotation.y = rotationY;
+       scene.add(ringMesh);
+       
+    };
+
+    // Spinning kinetic windmill obstacle
+    const addWindmill = (x, z) => {
+       const pylonGeo = new THREE.CylinderGeometry(0.3, 0.5, 6, 8);
+       const pylonMat = new THREE.MeshStandardMaterial({ color: 0x1f232d, roughness: 0.5 });
+       const pylon = new THREE.Mesh(pylonGeo, pylonMat);
+       pylon.position.set(x, 3, z);
+       pylon.castShadow = true;
+       scene.add(pylon);
+
+       // Spinner blades
+       const bladeGroup = new THREE.Group();
+       const bladeMat = new THREE.MeshStandardMaterial({
+         color: 0xffd43b, // Yellow neon
+         emissive: 0xffd43b,
+         emissiveIntensity: 1.2
+       });
+       
+       for (let i = 0; i < 4; i++) {
+         const blade = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.25, 0.1), bladeMat);
+         blade.rotation.z = (i * Math.PI) / 2;
+         blade.position.x = 1.75 * Math.cos((i * Math.PI) / 2);
+         blade.position.y = 1.75 * Math.sin((i * Math.PI) / 2);
+         bladeGroup.add(blade);
+       }
+       bladeGroup.position.set(x, 5.5, z + 0.4);
+       scene.add(bladeGroup);
+
+       // Physics pylon (static)
+       const pylonBody = new CANNON.Body({ mass: 0 });
+       pylonBody.addShape(new CANNON.Cylinder(0.5, 0.5, 6, 8));
+       pylonBody.position.set(x, 3, z);
+       const q = new CANNON.Quaternion();
+       q.setFromAxisAngle(new CANNON.Vec3(1,0,0), -Math.PI/2);
+       pylonBody.quaternion.copy(q);
+       world.addBody(pylonBody);
+
+       // Physics blades (static, manually updated rotation)
+       const bladeBody = new CANNON.Body({ mass: 0 });
+       bladeBody.addShape(new CANNON.Box(new CANNON.Vec3(3.5, 0.25, 0.1)));
+       bladeBody.addShape(new CANNON.Box(new CANNON.Vec3(0.25, 3.5, 0.1)));
+       bladeBody.position.set(x, 5.5, z + 0.4);
+       world.addBody(bladeBody);
+
+       windmills.push({ mesh: bladeGroup, body: bladeBody, angle: 0 });
+       props.push({ body: bladeBody, mesh: bladeGroup });
+    };
+
+    // Populate Environment
+    addRamp(-5, -10, 0);
+    addRamp(20, -15, Math.PI/2);
+    addRamp(-25, -25, -Math.PI/4);
+    addRamp(5, -45, Math.PI);
+    addRamp(30, -50, Math.PI/2);
+
+    // Stunt jumps and rings
+    addCurvedRamp(0, -6, Math.PI); // Jump right after start
+    addStuntRing(0, 4.2, -12.5, 0); // Jump ring
+
+    addCurvedRamp(5, -45, Math.PI); // Jump in the middle
+    addStuntRing(5, 4.2, -51.5, 0); // Jump ring
+
+    // Kinetic Windmills
+    addWindmill(-8, -35);
+    addWindmill(10, -22);
+
+    const zonePositions = [
+      { x: -15, z: -20 },
+      { x: 18, z: -32 },
+      { x: -25, z: -45 },
+      { x: 10, z: -55 },
+      { x: 28, z: -68 },
+      { x: -5, z: -82 }
+    ];
+
+    // Generate canyon walls
+    // Back Wall
+    for (let x = -50; x <= 50; x += 12) {
+      addCliff(x, -95, 6 + Math.random() * 4);
+    }
+    // Front Wall (with opening in center)
+    for (let x = -50; x <= 50; x += 12) {
+      if (Math.abs(x) < 15) continue;
+      addCliff(x, 20, 6 + Math.random() * 4);
+    }
+    // Left Wall
+    for (let z = -95; z <= 20; z += 12) {
+      addCliff(-45, z, 6 + Math.random() * 4);
+    }
+    // Right Wall
+    for (let z = -95; z <= 20; z += 12) {
+      addCliff(45, z, 6 + Math.random() * 4);
+    }
+
+    // Populate scattered props
     for(let i=0; i<65; i++) {
        let tx, tz;
        let ok = false;
        while(!ok) {
-         tx = (Math.random() - 0.5) * 80; // keep it within -40 to 40 x
-         tz = (Math.random() - 0.5) * 90 - 35; // from ~ -80 to 10 z
+         tx = (Math.random() - 0.5) * 80;
+         tz = (Math.random() - 0.5) * 90 - 35;
          
-         // Don't place near start (0, 5)
          const distToStart = Math.sqrt(tx*tx + (tz-5)*(tz-5));
          if (distToStart < 8) continue;
 
-         // Check distance to all zones
          let tooClose = false;
          for (let j = 0; j < zonePositions.length; j++) {
            const z = zonePositions[j];
@@ -488,6 +780,119 @@ function App() {
     [[-10,-20], [-10.5,-20.5], [-9.5,-20.5], [-11,-21], [-10,-21], [-9,-21]].forEach(pos => addPin(pos[0], pos[1]));
     [[15,-25], [15.5,-25.5], [14.5,-25.5], [16,-26], [15,-26], [14,-26]].forEach(pos => addPin(pos[0], pos[1]));
     [[-15,-50], [-15.5,-50.5], [-14.5,-50.5], [-16,-51], [-15,-51], [-14,-51]].forEach(pos => addPin(pos[0], pos[1]));
+
+    // Road network generation
+    const roadColorStartToHiresia = 0x4dabf7; // Blue
+    const roadColorHiresiaToRapid = 0x38d9a9; // Green
+    const roadColorRapidToAbout = 0xbe4bdb;   // Purple
+    const roadColorAboutToExp = 0xffd43b;     // Yellow
+    const roadColorExpToStack = 0xff922b;     // Orange
+    const roadColorStackToContact = 0xff6b6b; // Red
+
+    const roadPoints = [
+      { pos: { x: 0, z: 5 }, color: roadColorStartToHiresia },
+      { pos: { x: -15, z: -20 }, color: roadColorHiresiaToRapid },
+      { pos: { x: 18, z: -32 }, color: roadColorRapidToAbout },
+      { pos: { x: -25, z: -45 }, color: roadColorAboutToExp },
+      { pos: { x: 10, z: -55 }, color: roadColorExpToStack },
+      { pos: { x: 28, z: -68 }, color: roadColorStackToContact },
+      { pos: { x: -5, z: -82 }, color: 0xff6b6b }
+    ];
+
+    const createRoadSegment = (p1, p2, roadColor) => {
+      const dx = p2.x - p1.x;
+      const dz = p2.z - p1.z;
+      const dist = Math.sqrt(dx*dx + dz*dz);
+      const angle = Math.atan2(dx, dz);
+
+      const roadMat = new THREE.MeshStandardMaterial({
+        color: theme === 'dark' ? 0x16181f : 0xe2e4e8,
+        roughness: 0.8,
+        metalness: 0.1,
+      });
+
+      const roadMesh = new THREE.Mesh(new THREE.PlaneGeometry(5.0, dist), roadMat);
+      roadMesh.position.set((p1.x + p2.x) / 2, 0.002, (p1.z + p2.z) / 2);
+      roadMesh.rotation.order = 'YXZ';
+      roadMesh.rotation.y = angle;
+      roadMesh.rotation.x = -Math.PI / 2;
+      roadMesh.receiveShadow = true;
+
+      // Glow borders
+      const borderGeo = new THREE.PlaneGeometry(0.12, dist);
+      const borderMat = new THREE.MeshBasicMaterial({
+        color: roadColor,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false
+      });
+
+      const leftBorder = new THREE.Mesh(borderGeo, borderMat);
+      leftBorder.position.set(-2.5, 0, 0.001);
+      const rightBorder = new THREE.Mesh(borderGeo, borderMat);
+      rightBorder.position.set(2.5, 0, 0.001);
+
+      roadMesh.add(leftBorder);
+      roadMesh.add(rightBorder);
+
+      scene.add(roadMesh);
+    };
+
+    for (let i = 0; i < roadPoints.length - 1; i++) {
+      createRoadSegment(roadPoints[i].pos, roadPoints[i + 1].pos, roadPoints[i].color);
+    }
+
+    // Glowing beacons above project zones
+    const addBeacon = (x, z, color) => {
+      const beaconGeo = new THREE.CylinderGeometry(0.1, 0.5, 45, 12, 1, true);
+      const beaconMat = new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.12,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide
+      });
+      const beaconMesh = new THREE.Mesh(beaconGeo, beaconMat);
+      beaconMesh.position.set(x, 22.5, z);
+      scene.add(beaconMesh);
+    };
+    
+    addBeacon(-15, -20, 0x4dabf7);
+    addBeacon(18, -32, 0x38d9a9);
+    addBeacon(-25, -45, 0xbe4bdb);
+    addBeacon(10, -55, 0xffd43b);
+    addBeacon(28, -68, 0xff922b);
+    addBeacon(-5, -82, 0xff6b6b);
+
+    // Sky dust particles setup
+    const dustCount = 200;
+    const dustGeo = new THREE.BufferGeometry();
+    const dustPositions = new Float32Array(dustCount * 3);
+    const dustVelocities = [];
+
+    for (let i = 0; i < dustCount; i++) {
+      dustPositions[i * 3 + 0] = (Math.random() - 0.5) * 160;
+      dustPositions[i * 3 + 1] = 2 + Math.random() * 30; // Float between y=2 and y=32
+      dustPositions[i * 3 + 2] = (Math.random() - 0.5) * 160 - 35;
+      
+      dustVelocities.push(new THREE.Vector3(
+        (Math.random() - 0.5) * 0.05,
+        -0.05 - Math.random() * 0.1, // float downwards
+        (Math.random() - 0.5) * 0.05
+      ));
+    }
+
+    dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
+    const dustMat = new THREE.PointsMaterial({
+      color: theme === 'dark' ? 0xffffff : 0xffaa00,
+      size: 0.15,
+      transparent: true,
+      opacity: 0.45,
+      blending: THREE.AdditiveBlending
+    });
+    const dustMesh = new THREE.Points(dustGeo, dustMat);
+    scene.add(dustMesh);
 
     // Zone monuments — positioned near their respective zone pads
     const monMat1 = new THREE.MeshStandardMaterial({ color: 0xFF6B6B, roughness: 0.2, metalness: 0.8 });
@@ -567,11 +972,156 @@ function App() {
     createZone('stack',       28, -68,  0xff922b, stackMon);
     createZone('contact',     -5, -82,  0xff6b6b, contactMon);
 
+    // ── SMOKE PARTICLES & SKID MARKS ─────────────────────────────────────────
+    const smokeParticleCount = 200;
+    const smokeParticles = [];
+    const smokeDummy = new THREE.Object3D();
+    const smokeColorData = new Float32Array(smokeParticleCount * 3);
+    let smokeParticleIndex = 0;
+
+    const smokeGeo = new THREE.PlaneGeometry(1, 1);
+    smokeGeo.setAttribute('color', new THREE.InstancedBufferAttribute(smokeColorData, 3));
+
+    // Create a procedural smoke texture using HTML5 Canvas to avoid 404 errors
+    const smokeCanvas = document.createElement('canvas');
+    smokeCanvas.width = 64;
+    smokeCanvas.height = 64;
+    const smokeCtx = smokeCanvas.getContext('2d');
+    const smokeGrad = smokeCtx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    smokeGrad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    smokeGrad.addColorStop(0.3, 'rgba(230, 230, 230, 0.85)');
+    smokeGrad.addColorStop(0.6, 'rgba(160, 160, 160, 0.2)');
+    smokeGrad.addColorStop(1, 'rgba(160, 160, 160, 0)');
+    smokeCtx.fillStyle = smokeGrad;
+    smokeCtx.fillRect(0, 0, 64, 64);
+    const smokeTexture = new THREE.CanvasTexture(smokeCanvas);
+
+    const smokeMat = new THREE.MeshBasicMaterial({
+      map: smokeTexture,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexColors: true, // Use vertex colors for individual opacity/color
+    });
+
+    for (let i = 0; i < smokeParticleCount; i++) {
+      smokeColorData[i * 3 + 0] = 0;
+      smokeColorData[i * 3 + 1] = 0;
+      smokeColorData[i * 3 + 2] = 0;
+    }
+
+    const smokeMesh = new THREE.InstancedMesh(smokeGeo, smokeMat, smokeParticleCount);
+    smokeMesh.frustumCulled = false;
+    scene.add(smokeMesh);
+
+    // Skid marks (Tyre Marks)
+    const skidMarkCount = 800;
+    const skidMarks = [];
+    const skidDummy = new THREE.Object3D();
+    let skidMarkIndex = 0;
+
+    const skidGeo = new THREE.PlaneGeometry(0.3, 0.5); // Width of tyre (0.3m), segment length
+    skidGeo.rotateX(-Math.PI / 2); // Lay flat on XZ plane
+
+    const skidMat = new THREE.MeshBasicMaterial({
+      color: theme === 'dark' ? 0x0c0f16 : 0x3d2b1f, // Darker tyre color matching themes
+      transparent: true,
+      opacity: 0.48, // Increased opacity for better visibility
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+    });
+
+    const skidMesh = new THREE.InstancedMesh(skidGeo, skidMat, skidMarkCount);
+    skidMesh.frustumCulled = false;
+    scene.add(skidMesh);
+
+    for (let i = 0; i < skidMarkCount; i++) {
+      skidDummy.position.set(0, -100, 0);
+      skidDummy.updateMatrix();
+      skidMesh.setMatrixAt(i, skidDummy.matrix);
+      skidMarks.push({ age: Infinity, maxAge: 8.0 });
+    }
+    skidMesh.instanceMatrix.needsUpdate = true;
+
+    for (let i = 0; i < smokeParticleCount; i++) {
+      smokeParticles.push({
+        position: new THREE.Vector3(),
+        scale: 1,
+        age: Infinity, // Start as inactive
+        maxAge: 1 + Math.random(), // Lifespan of 1 to 2 seconds
+        velocity: new THREE.Vector3(0, 0.2 + Math.random() * 0.3, 0),
+      });
+    }
+
+    const spawnSmokeParticle = (position) => {
+      const p = smokeParticles[smokeParticleIndex];
+      p.position.copy(position);
+      p.age = 0;
+      p.scale = 0.1 + Math.random() * 0.4;
+      
+      // Give it a slight random sideways velocity
+      p.velocity.x = (Math.random() - 0.5) * 0.3;
+      p.velocity.z = (Math.random() - 0.5) * 0.3;
+
+      smokeParticleIndex = (smokeParticleIndex + 1) % smokeParticleCount;
+    };
+
+    const spawnSkidMark = (position, rotationY) => {
+      const i = skidMarkIndex;
+      skidMarks[i].age = 0;
+      
+      skidDummy.position.copy(position);
+      skidDummy.position.y = position.y - 0.39; // 0.4 wheel radius, 0.01 offset above ground/ramp to prevent z-fighting
+      skidDummy.rotation.set(0, rotationY, 0);
+      skidDummy.scale.set(1, 1, 1);
+      skidDummy.updateMatrix();
+      skidMesh.setMatrixAt(i, skidDummy.matrix);
+      
+      skidMarkIndex = (skidMarkIndex + 1) % skidMarkCount;
+      skidMesh.instanceMatrix.needsUpdate = true;
+    };
+
+    // ── AUDIO ENGINE ──────────────────────────────────────────────────────
+    const listener = new THREE.AudioListener();
+    camera.add(listener);
+
+    const engineSound = new THREE.Audio(listener);
+    const skidSound = new THREE.Audio(listener);
+    const collisionSound = new THREE.Audio(listener);
+
+    const audioLoader = new THREE.AudioLoader();
+    audioLoader.load('/engine.mp3', (buffer) => {
+      engineSound.setBuffer(buffer);
+      engineSound.setLoop(true);
+      engineSound.setVolume(0.3);
+      // engineSound.play(); // Will be enabled later
+    });
+    audioLoader.load('/skid.mp3', (buffer) => {
+      skidSound.setBuffer(buffer);
+      skidSound.setLoop(true);
+      skidSound.setVolume(0); // Start silent
+      // skidSound.play(); // Will be enabled later
+    });
+    audioLoader.load('/impact.mp3', (buffer) => {
+      collisionSound.setBuffer(buffer);
+      collisionSound.setLoop(false);
+    });
+
+
     // ── BRUNO SIMON STYLE CAR ───────────────────────────────────────────────
     const { chassisBody, vehicle, carGroup, wheels } = createCar(theme);
     vehicle.addToWorld(world);
     scene.add(carGroup);
     wheels.forEach(w => scene.add(w));
+
+    // Collision sound
+    chassisBody.addEventListener('collide', (e) => {
+      const impact = e.contact.getImpactVelocityAlongNormal();
+      if (impact > 2.0 && !collisionSound.isPlaying) {
+        collisionSound.setVolume(Math.min(1.0, impact / 20));
+        collisionSound.play();
+      }
+    });
 
     // ── CONTROLS ────────────────────────────────────────────────────────────
     const keys = { up: false, down: false, left: false, right: false, space: false, r: false };
@@ -639,6 +1189,7 @@ function App() {
     // ── ANIMATION LOOP ───────────────────────────────────────────────────────
     let reqId;
     const clock = new THREE.Clock();
+    const windmillQ = new CANNON.Quaternion();
 
     function animate() {
       reqId = requestAnimationFrame(animate);
@@ -765,17 +1316,15 @@ function App() {
         const _fv = new THREE.Vector3(0, 0, 1).applyQuaternion(_fq);
         const forwardSpeed = chassisBody.velocity.dot(new CANNON.Vec3(_fv.x, _fv.y, _fv.z));
         
-        if (keys.up && keys.down) {
-          brakeForce = 100;
-        } else if (keys.down && forwardSpeed > 0.2) {
+        if (keys.down && forwardSpeed > 0.2) {
           brakeForce = 100;
         } else if (keys.up && forwardSpeed < -0.2) {
           brakeForce = 100;
-        } else if (keys.space) {
-          brakeForce = 80; // Heavy handbrake
-        } else if (!keys.up && !keys.down) {
+        } else if (!keys.up && !keys.down && !keys.space) {
           // Automatic engine braking to stop coasting inertia instantly
           brakeForce = 8.5;
+        } else if (keys.space) {
+          brakeForce = 0; // Disable regular braking when drifting
         }
         
         if (brakeForce > 0) currentEngineForce = 0;
@@ -797,8 +1346,117 @@ function App() {
       // Apply brakes to all wheels
       for (let i = 0; i < 4; i++) vehicle.setBrake(brakeForce, i);
 
+      // --- ARCADE DRIFTING LOGIC ---
+      if (keys.space) {
+        // Lower friction on rear wheels to initiate slide. 1.0 is a good starting point.
+        vehicle.wheelInfos[2].frictionSlip = 1.0;
+        vehicle.wheelInfos[3].frictionSlip = 1.0;
+
+        // Apply a yaw torque to kick the tail out, but only if turning
+        let yawTorque = 0;
+        if (keys.left) yawTorque = 1.5;
+        if (keys.right) yawTorque = -1.5;
+        
+        // Only apply torque if moving at a reasonable speed
+        if (speedVal > 5 && yawTorque !== 0) {
+          chassisBody.angularVelocity.y += yawTorque * delta * 15;
+        }
+
+        // Spawn smoke particles and skid marks from rear wheels during any handbrake slide
+        if (speedVal > 0.5) {
+            const wlTouch = vehicle.wheelInfos[2].raycastResult.hasHit;
+            const wrTouch = vehicle.wheelInfos[3].raycastResult.hasHit;
+
+            // Extract yaw heading to align skid marks
+            const fwd = new THREE.Vector3(0, 0, 1);
+            fwd.applyQuaternion(new THREE.Quaternion(
+              chassisBody.quaternion.x, chassisBody.quaternion.y,
+              chassisBody.quaternion.z, chassisBody.quaternion.w
+            ));
+            const headingAngle = Math.atan2(fwd.x, fwd.z);
+
+            if (wlTouch) {
+                const hitPt = vehicle.wheelInfos[2].raycastResult.hitPointWorld;
+                const contactPos = new THREE.Vector3(hitPt.x, hitPt.y + 0.012, hitPt.z);
+                spawnSmokeParticle(contactPos);
+                spawnSkidMark(contactPos, headingAngle);
+            }
+
+            if (wrTouch) {
+                const hitPt = vehicle.wheelInfos[3].raycastResult.hitPointWorld;
+                const contactPos = new THREE.Vector3(hitPt.x, hitPt.y + 0.012, hitPt.z);
+                spawnSmokeParticle(contactPos);
+                spawnSkidMark(contactPos, headingAngle);
+            }
+        }
+      } else {
+        // When spacebar is released, smoothly restore friction
+        vehicle.wheelInfos[2].frictionSlip = THREE.MathUtils.lerp(vehicle.wheelInfos[2].frictionSlip, 4.0, delta * 8);
+        vehicle.wheelInfos[3].frictionSlip = THREE.MathUtils.lerp(vehicle.wheelInfos[3].frictionSlip, 4.0, delta * 8);
+      }
+      
+      // --- AUDIO LOGIC --- (Commented out as requested)
+      // engineSound.setPlaybackRate(0.8 + (speedVal / 30));
+      // const targetSkidVolume = (keys.space && speedVal > 5) ? 0.7 : 0;
+      // skidSound.setVolume(THREE.MathUtils.lerp(skidSound.volume, targetSkidVolume, delta * 10));
+      // --- AUDIO LOGIC ---
+      // // engineSound.setPlaybackRate(0.8 + (speedVal / 30));
+      // // const targetSkidVolume = (keys.space && speedVal > 5) ? 0.7 : 0;
+      // // skidSound.setVolume(THREE.MathUtils.lerp(skidSound.volume, targetSkidVolume, delta * 10));
+
       // Downforce
       chassisBody.applyForce(new CANNON.Vec3(0, -speedVal * speedVal * 0.15, 0), new CANNON.Vec3(0, 0, 0));
+
+      // Update smoke particles
+      smokeParticles.forEach((p, i) => {
+        if (p.age < p.maxAge) {
+          p.age += delta;
+
+          const lifeFactor = p.age / p.maxAge;
+          const invLifeFactor = 1 - lifeFactor;
+
+          // Scale up over lifetime
+          p.scale = (0.1 + Math.random() * 0.4) * (1 + lifeFactor * 2);
+          
+          // Update particle's position
+          p.position.addScaledVector(p.velocity, delta);
+
+          smokeDummy.position.copy(p.position);
+          smokeDummy.scale.set(p.scale, p.scale, p.scale);
+          smokeDummy.updateMatrix();
+          smokeMesh.setMatrixAt(i, smokeDummy.matrix);
+
+          // Update color: Start light-gray and fade to black (which is transparent in AdditiveBlending)
+          const color = new THREE.Color(0xd0d0d0);
+          color.multiplyScalar(invLifeFactor * 0.45);
+          color.toArray(smokeColorData, i * 3);
+
+        } else {
+          // Hide inactive particles by setting scale to 0
+          smokeDummy.scale.set(0, 0, 0);
+          smokeDummy.updateMatrix();
+          smokeMesh.setMatrixAt(i, smokeDummy.matrix);
+        }
+      });
+      smokeMesh.instanceMatrix.needsUpdate = true;
+      smokeMesh.geometry.attributes.color.needsUpdate = true;
+
+      // Update skid marks age and hide expired ones
+      let skidMeshNeedsUpdate = false;
+      skidMarks.forEach((s, i) => {
+        if (s.age < s.maxAge) {
+          s.age += delta;
+          if (s.age >= s.maxAge) {
+            skidDummy.position.set(0, -100, 0);
+            skidDummy.updateMatrix();
+            skidMesh.setMatrixAt(i, skidDummy.matrix);
+            skidMeshNeedsUpdate = true;
+          }
+        }
+      });
+      if (skidMeshNeedsUpdate) {
+        skidMesh.instanceMatrix.needsUpdate = true;
+      }
 
       world.step(1 / 60, delta, 3);
 
@@ -812,14 +1470,39 @@ function App() {
         wheels[i].quaternion.copy(t.quaternion);
       }
 
-      // Sync dynamic props (pins)
+      // Sync props (pins, blocks, ramps, cliffs)
       props.forEach(p => {
-        if(!p.static) {
-           p.mesh.position.copy(p.body.position);
-           const q = new THREE.Quaternion().copy(p.body.quaternion);
-           const fixQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), Math.PI/2);
-           p.mesh.quaternion.copy(q.multiply(fixQ));
+         p.mesh.position.copy(p.body.position);
+         if (p.isPin) {
+            const q = new THREE.Quaternion().copy(p.body.quaternion);
+            const fixQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), Math.PI/2);
+            p.mesh.quaternion.copy(q.multiply(fixQ));
+         } else {
+            p.mesh.quaternion.copy(p.body.quaternion);
+         }
+      });
+
+      // Animate sky dust particles
+      const positions = dustMesh.geometry.attributes.position.array;
+      for (let i = 0; i < dustCount; i++) {
+        positions[i * 3 + 0] += dustVelocities[i].x * delta * 15;
+        positions[i * 3 + 1] += dustVelocities[i].y * delta * 15;
+        positions[i * 3 + 2] += dustVelocities[i].z * delta * 15;
+
+        // Reset if they hit the ground
+        if (positions[i * 3 + 1] < 0) {
+          positions[i * 3 + 0] = (Math.random() - 0.5) * 160;
+          positions[i * 3 + 1] = 30;
+          positions[i * 3 + 2] = (Math.random() - 0.5) * 160 - 35;
         }
+      }
+      dustMesh.geometry.attributes.position.needsUpdate = true;
+
+      // Rotate kinetic windmills
+      windmills.forEach(w => {
+        w.angle += delta * 1.5;
+        windmillQ.setFromAxisAngle(new CANNON.Vec3(0, 0, 1), w.angle);
+        w.body.quaternion.copy(windmillQ);
       });
 
       // Zone Logic & Monument animations
