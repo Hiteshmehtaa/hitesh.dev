@@ -521,6 +521,12 @@ nav.scrolled::before {
   50%       { transform: translateY(6px); }
 }
 
+@keyframes trickPopupRise {
+  0%   { opacity: 0; transform: translate(-50%, -50%) translateY(0) scale(0.8); }
+  15%  { opacity: 1; transform: translate(-50%, -50%) translateY(-10px) scale(1.1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) translateY(-70px) scale(1); }
+}
+
 /* Collision Popup */
 .collision-popup {
   position: absolute;

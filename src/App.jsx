@@ -65,9 +65,9 @@ function createCar(theme) {
 
   const wheelOpts = {
     radius: 0.4, directionLocal: new CANNON.Vec3(0, -1, 0),
-    suspensionStiffness: 60, suspensionRestLength: 0.3,
+    suspensionStiffness: 38, suspensionRestLength: 0.3,
     maxSuspensionForce: 100000, maxSuspensionTravel: 0.3,
-    dampingRelaxation: 8.0, dampingCompression: 10.0,
+    dampingRelaxation: 2.5, dampingCompression: 4.6,
     axleLocal: new CANNON.Vec3(-1, 0, 0), rollInfluence: 0.01,
   };
   vehicle.addWheel({ ...wheelOpts, frictionSlip: 3.5, chassisConnectionPointLocal: new CANNON.Vec3(-0.8, 0.4,  1.0) });
@@ -86,6 +86,17 @@ function createCar(theme) {
 
   return { chassisBody, vehicle, carGroup, wheels };
 }
+
+// Single source of truth for each zone's accent color, shared between the
+// WebGL scene (light beam, ring, pad) and the DOM holo-card glow so they
+// always match exactly.
+const zoneColorHex = {
+  hiresia: 0x4dabf7, rapidrescue: 0x38d9a9, about: 0xbe4bdb,
+  experience: 0xffd43b, stack: 0xff922b, contact: 0xff6b6b,
+};
+const zoneColors = Object.fromEntries(
+  Object.entries(zoneColorHex).map(([id, hex]) => [id, '#' + hex.toString(16).padStart(6, '0')])
+);
 
 const projectsData = {
   hiresia: {
@@ -209,6 +220,82 @@ function ContactForm({ theme }) {
   );
 }
 
+// Instrument-cluster primitives for the dashboard zone reveal — diegetic to
+// the car itself (a gauge cluster sliding into view like glancing at the
+// dash) instead of a floating card/window laid over the driving view.
+function TermTags({ tags }) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px 16px', fontSize: '12.5px' }}>
+      {tags.map(t => (
+        <span key={t} style={{ opacity: 0.9, whiteSpace: 'nowrap' }}>
+          <span style={{ opacity: 0.4 }}>[</span>{t}<span style={{ opacity: 0.4 }}>]</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// A circular gauge (tachometer-style) whose needle sweeps in to `value`
+// (0..1) shortly after mount, like a real dashboard's start-up self-test.
+function InstrumentGauge({ title, value, phosphor }) {
+  const [current, setCurrent] = useState(0);
+  useEffect(() => {
+    const t = setTimeout(() => setCurrent(value), 60);
+    return () => clearTimeout(t);
+  }, [value]);
+
+  const R = 44, CX = 65, CY = 66;
+  const toXY = (deg) => {
+    const rad = (deg - 90) * Math.PI / 180;
+    return [CX + R * Math.cos(rad), CY + R * Math.sin(rad)];
+  };
+  const [x1, y1] = toXY(-120);
+  const [x2, y2] = toXY(120);
+  const bgPath = `M ${x1} ${y1} A ${R} ${R} 0 1 1 ${x2} ${y2}`;
+  const [vx, vy] = toXY(-120 + current * 240);
+  const valuePath = `M ${x1} ${y1} A ${R} ${R} 0 ${current > 0.75 ? 1 : 0} 1 ${vx} ${vy}`;
+  const angle = -120 + current * 240;
+
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <svg width="130" height="82" viewBox="0 0 130 82">
+        <path d={bgPath} fill="none" stroke={`${phosphor}25`} strokeWidth="7" strokeLinecap="round" />
+        <path d={valuePath} fill="none" stroke={phosphor} strokeWidth="7" strokeLinecap="round" />
+        {[0, 0.25, 0.5, 0.75, 1].map((t, i) => {
+          const a = -120 + t * 240;
+          const [ix, iy] = toXY(a);
+          const rad = (a - 90) * Math.PI / 180;
+          const ox = CX + (R + 7) * Math.cos(rad), oy = CY + (R + 7) * Math.sin(rad);
+          return <line key={i} x1={ix} y1={iy} x2={ox} y2={oy} stroke={`${phosphor}55`} strokeWidth="1.5" />;
+        })}
+        <g style={{ transform: `rotate(${angle}deg)`, transformOrigin: `${CX}px ${CY}px`, transition: 'transform 1s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
+          <line x1={CX} y1={CY} x2={CX} y2={CY - R + 8} stroke={phosphor} strokeWidth="2.5" strokeLinecap="round" />
+        </g>
+        <circle cx={CX} cy={CY} r="4.5" fill={phosphor} />
+      </svg>
+      <div style={{ fontSize: '10px', letterSpacing: '1.5px', opacity: 0.75, marginTop: '2px', color: phosphor, fontWeight: 700 }}>{title}</div>
+    </div>
+  );
+}
+
+// Scrolling LCD trip-computer readout — a continuous marquee instead of a
+// paragraph block or bullet list.
+function LcdTicker({ text, phosphor }) {
+  return (
+    <div style={{
+      background: '#000', border: `1px solid ${phosphor}35`, borderRadius: '5px',
+      padding: '9px 0', overflow: 'hidden', whiteSpace: 'nowrap', position: 'relative',
+    }}>
+      <div style={{
+        display: 'inline-block', color: phosphor, fontSize: '12.5px', letterSpacing: '0.3px',
+        animation: 'dashTickerScroll 22s linear infinite', paddingLeft: '100%',
+      }}>
+        {text}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   
@@ -219,7 +306,9 @@ function App() {
   const [activeSection, setActiveSection] = useState('');
   const canvasContainerRef = useRef(null);
   const minimapRef = useRef(null);
-  
+  const comboHudRef = useRef(null);
+  const comboPopupLayerRef = useRef(null);
+
   // Platform Features State
   const [theme, setTheme] = useState('light');
   const [selectedProject, setSelectedProject] = useState(null);
@@ -944,6 +1033,19 @@ function App() {
     contactMon.scale.set(0.001, 0.001, 0.001);
     scene.add(contactMon);
 
+    // Holographic beam texture — soft vertical gradient, transparent at the top,
+    // used for the light column that rises from a zone's monument when active.
+    const beamCanvas = document.createElement('canvas');
+    beamCanvas.width = 32; beamCanvas.height = 128;
+    const beamCtx = beamCanvas.getContext('2d');
+    const beamGrad = beamCtx.createLinearGradient(0, 128, 0, 0);
+    beamGrad.addColorStop(0, 'rgba(255,255,255,0.9)');
+    beamGrad.addColorStop(0.55, 'rgba(255,255,255,0.25)');
+    beamGrad.addColorStop(1, 'rgba(255,255,255,0)');
+    beamCtx.fillStyle = beamGrad;
+    beamCtx.fillRect(0, 0, 32, 128);
+    const beamTexture = new THREE.CanvasTexture(beamCanvas);
+
     const zones = [];
     const createZone = (id, x, z, color, monument) => {
       const padGeo = new THREE.CylinderGeometry(3.5, 3.5, 0.1, 32);
@@ -952,7 +1054,7 @@ function App() {
       pad.position.set(x, 0.05, z);
       pad.receiveShadow = true;
       scene.add(pad);
-      
+
       const ringGeo = new THREE.TorusGeometry(3.0, 0.08, 16, 48);
       const ringMat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.8 });
       const ring = new THREE.Mesh(ringGeo, ringMat);
@@ -960,17 +1062,28 @@ function App() {
       ring.rotation.x = Math.PI / 2;
       ring.castShadow = true;
       scene.add(ring);
-      
-      zones.push({ id, position: new THREE.Vector3(x, 0, z), ring, monument });
+
+      // Holographic light column — hidden (scale 0.001) until this zone is active
+      const beamGeo = new THREE.CylinderGeometry(0.15, 1.1, 9, 20, 1, true);
+      const beamMat = new THREE.MeshBasicMaterial({
+        map: beamTexture, color, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false,
+      });
+      const beam = new THREE.Mesh(beamGeo, beamMat);
+      beam.position.set(x, 4.5, z);
+      beam.scale.y = 0.001;
+      scene.add(beam);
+
+      zones.push({ id, position: new THREE.Vector3(x, 0, z), ring, monument, beam });
     };
 
     // Zones — spread well apart so player needs to actually explore
-    createZone('hiresia',    -15, -20,  0x4dabf7, hMon);
-    createZone('rapidrescue', 18, -32,  0x38d9a9, rMon);
-    createZone('about',      -25, -45,  0xbe4bdb, aboutMon);
-    createZone('experience',  10, -55,  0xffd43b, eMon);
-    createZone('stack',       28, -68,  0xff922b, stackMon);
-    createZone('contact',     -5, -82,  0xff6b6b, contactMon);
+    createZone('hiresia',    -15, -20,  zoneColorHex.hiresia, hMon);
+    createZone('rapidrescue', 18, -32,  zoneColorHex.rapidrescue, rMon);
+    createZone('about',      -25, -45,  zoneColorHex.about, aboutMon);
+    createZone('experience',  10, -55,  zoneColorHex.experience, eMon);
+    createZone('stack',       28, -68,  zoneColorHex.stack, stackMon);
+    createZone('contact',     -5, -82,  zoneColorHex.contact, contactMon);
 
     // ── SMOKE PARTICLES & SKID MARKS ─────────────────────────────────────────
     const smokeParticleCount = 200;
@@ -1093,19 +1206,45 @@ function App() {
     audioLoader.load('/engine.mp3', (buffer) => {
       engineSound.setBuffer(buffer);
       engineSound.setLoop(true);
-      engineSound.setVolume(0.3);
-      // engineSound.play(); // Will be enabled later
+      engineSound.setVolume(0);
+      if (audioUnlocked) engineSound.play();
     });
     audioLoader.load('/skid.mp3', (buffer) => {
       skidSound.setBuffer(buffer);
       skidSound.setLoop(true);
-      skidSound.setVolume(0); // Start silent
-      // skidSound.play(); // Will be enabled later
+      skidSound.setVolume(0); // Start silent, faded in only while actually drifting
+      if (audioUnlocked) skidSound.play();
     });
-    audioLoader.load('/impact.mp3', (buffer) => {
-      collisionSound.setBuffer(buffer);
-      collisionSound.setLoop(false);
-    });
+
+    // No impact.mp3 asset shipped — synthesize a short noise "thud" instead of
+    // depending on a file that doesn't exist (which would silently 404 forever).
+    const impactBuffer = (() => {
+      const ctx = listener.context;
+      const duration = 0.35;
+      const buf = ctx.createBuffer(1, ctx.sampleRate * duration, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        const t = i / data.length;
+        const envelope = Math.pow(1 - t, 3.5);
+        data[i] = (Math.random() * 2 - 1) * envelope;
+      }
+      return buf;
+    })();
+    collisionSound.setBuffer(impactBuffer);
+    collisionSound.setLoop(false);
+
+    // Browsers block audio until a user gesture — unlock + start looping
+    // engine/skid sources (muted) on the first key press or click.
+    let audioUnlocked = false;
+    const unlockAudio = () => {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
+      if (listener.context.state === 'suspended') listener.context.resume();
+      if (engineSound.buffer && !engineSound.isPlaying) engineSound.play();
+      if (skidSound.buffer && !skidSound.isPlaying) skidSound.play();
+    };
+    window.addEventListener('keydown', unlockAudio, { once: true });
+    container.addEventListener('pointerdown', unlockAudio, { once: true });
 
 
     // ── BRUNO SIMON STYLE CAR ───────────────────────────────────────────────
@@ -1141,6 +1280,40 @@ function App() {
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKey);
     let currentEngineForce = 0, steerVal = 0;
+    let totalScore = 0, airborneTime = 0, wasAirborne = false, driftTime = 0, wasDrifting = false;
+
+    // Floating "+N TRICK" popup near the car's current screen position,
+    // written straight to the DOM (no React state) so it can fire at 60fps
+    // without triggering re-renders.
+    const spawnTrickPopup = (label, color) => {
+      const layer = comboPopupLayerRef.current;
+      if (!layer) return;
+      const carScreen = carGroup.position.clone().add(new THREE.Vector3(0, 2.2, 0)).project(camera);
+      if (carScreen.z > 1) return;
+      const x = (carScreen.x * 0.5 + 0.5) * container.clientWidth;
+      const y = (-carScreen.y * 0.5 + 0.5) * container.clientHeight;
+      const el = document.createElement('div');
+      el.textContent = label;
+      el.style.cssText = `position:absolute; left:${x}px; top:${y}px; transform:translate(-50%,-50%); color:${color}; font-weight:bold; font-size:16px; font-family:'Space Grotesk', sans-serif; text-shadow:0 2px 8px rgba(0,0,0,0.4); animation:trickPopupRise 1.1s ease-out forwards; white-space:nowrap;`;
+      layer.appendChild(el);
+      setTimeout(() => el.remove(), 1150);
+    };
+
+    const addScore = (points, label, color) => {
+      totalScore += points;
+      spawnTrickPopup(`+${points} ${label}`, color);
+      if (comboHudRef.current) {
+        comboHudRef.current.textContent = String(totalScore);
+        comboHudRef.current.style.transform = 'scale(1.25)';
+        comboHudRef.current.style.transition = 'transform 0.08s ease-out';
+        requestAnimationFrame(() => {
+          if (comboHudRef.current) {
+            comboHudRef.current.style.transform = 'scale(1)';
+            comboHudRef.current.style.transition = 'transform 0.4s ease';
+          }
+        });
+      }
+    };
     let autopilotTarget = null;
 
     const camTarget = new THREE.Vector3();
@@ -1356,53 +1529,61 @@ function App() {
         let yawTorque = 0;
         if (keys.left) yawTorque = 1.5;
         if (keys.right) yawTorque = -1.5;
-        
+
         // Only apply torque if moving at a reasonable speed
         if (speedVal > 5 && yawTorque !== 0) {
           chassisBody.angularVelocity.y += yawTorque * delta * 15;
-        }
-
-        // Spawn smoke particles and skid marks from rear wheels during any handbrake slide
-        if (speedVal > 0.5) {
-            const wlTouch = vehicle.wheelInfos[2].raycastResult.hasHit;
-            const wrTouch = vehicle.wheelInfos[3].raycastResult.hasHit;
-
-            // Extract yaw heading to align skid marks
-            const fwd = new THREE.Vector3(0, 0, 1);
-            fwd.applyQuaternion(new THREE.Quaternion(
-              chassisBody.quaternion.x, chassisBody.quaternion.y,
-              chassisBody.quaternion.z, chassisBody.quaternion.w
-            ));
-            const headingAngle = Math.atan2(fwd.x, fwd.z);
-
-            if (wlTouch) {
-                const hitPt = vehicle.wheelInfos[2].raycastResult.hitPointWorld;
-                const contactPos = new THREE.Vector3(hitPt.x, hitPt.y + 0.012, hitPt.z);
-                spawnSmokeParticle(contactPos);
-                spawnSkidMark(contactPos, headingAngle);
-            }
-
-            if (wrTouch) {
-                const hitPt = vehicle.wheelInfos[3].raycastResult.hitPointWorld;
-                const contactPos = new THREE.Vector3(hitPt.x, hitPt.y + 0.012, hitPt.z);
-                spawnSmokeParticle(contactPos);
-                spawnSkidMark(contactPos, headingAngle);
-            }
         }
       } else {
         // When spacebar is released, smoothly restore friction
         vehicle.wheelInfos[2].frictionSlip = THREE.MathUtils.lerp(vehicle.wheelInfos[2].frictionSlip, 4.0, delta * 8);
         vehicle.wheelInfos[3].frictionSlip = THREE.MathUtils.lerp(vehicle.wheelInfos[3].frictionSlip, 4.0, delta * 8);
       }
+
+      // Detect real slip (handbrake, or the tail stepping out under a fast
+      // corner) purely from the chassis's own lateral velocity — this doesn't
+      // touch handling, it only decides when to draw marks/smoke/sound.
+      const slipQ = new THREE.Quaternion(chassisBody.quaternion.x, chassisBody.quaternion.y, chassisBody.quaternion.z, chassisBody.quaternion.w);
+      const slipRight = new THREE.Vector3(1, 0, 0).applyQuaternion(slipQ);
+      const lateralSpeed = Math.abs(chassisBody.velocity.x * slipRight.x + chassisBody.velocity.y * slipRight.y + chassisBody.velocity.z * slipRight.z);
+      const isSliding = keys.space ? speedVal > 0.5 : (lateralSpeed > 3.0 && speedVal > 4);
+
+      if (isSliding) {
+        const wlTouch = vehicle.wheelInfos[2].raycastResult.hasHit;
+        const wrTouch = vehicle.wheelInfos[3].raycastResult.hasHit;
+
+        // Extract yaw heading to align skid marks
+        const fwd = new THREE.Vector3(0, 0, 1);
+        fwd.applyQuaternion(slipQ);
+        const headingAngle = Math.atan2(fwd.x, fwd.z);
+
+        if (wlTouch) {
+            const hitPt = vehicle.wheelInfos[2].raycastResult.hitPointWorld;
+            const contactPos = new THREE.Vector3(hitPt.x, hitPt.y + 0.012, hitPt.z);
+            spawnSmokeParticle(contactPos);
+            spawnSkidMark(contactPos, headingAngle);
+        }
+
+        if (wrTouch) {
+            const hitPt = vehicle.wheelInfos[3].raycastResult.hitPointWorld;
+            const contactPos = new THREE.Vector3(hitPt.x, hitPt.y + 0.012, hitPt.z);
+            spawnSmokeParticle(contactPos);
+            spawnSkidMark(contactPos, headingAngle);
+        }
+      }
       
-      // --- AUDIO LOGIC --- (Commented out as requested)
-      // engineSound.setPlaybackRate(0.8 + (speedVal / 30));
-      // const targetSkidVolume = (keys.space && speedVal > 5) ? 0.7 : 0;
-      // skidSound.setVolume(THREE.MathUtils.lerp(skidSound.volume, targetSkidVolume, delta * 10));
       // --- AUDIO LOGIC ---
-      // // engineSound.setPlaybackRate(0.8 + (speedVal / 30));
-      // // const targetSkidVolume = (keys.space && speedVal > 5) ? 0.7 : 0;
-      // // skidSound.setVolume(THREE.MathUtils.lerp(skidSound.volume, targetSkidVolume, delta * 10));
+      if (engineSound.buffer) {
+        const throttle = Math.abs(currentEngineForce) / maxEngineForce; // 0..1, how hard the engine is being asked to work
+        const targetRate = 0.75 + Math.min(speedVal / 22, 1) * 0.9 + throttle * 0.25;
+        const targetVol = 0.12 + Math.min(speedVal / 30, 1) * 0.22 + throttle * 0.12;
+        engineSound.setPlaybackRate(THREE.MathUtils.lerp(engineSound.playbackRate, targetRate, delta * 4));
+        engineSound.setVolume(THREE.MathUtils.lerp(engineSound.getVolume(), targetVol, delta * 4));
+      }
+      if (skidSound.buffer) {
+        const targetSkidVolume = isSliding ? THREE.MathUtils.clamp(0.25 + speedVal / 25, 0, 0.85) : 0;
+        skidSound.setVolume(THREE.MathUtils.lerp(skidSound.getVolume(), targetSkidVolume, delta * 10));
+      }
 
       // Downforce
       chassisBody.applyForce(new CANNON.Vec3(0, -speedVal * speedVal * 0.15, 0), new CANNON.Vec3(0, 0, 0));
@@ -1460,14 +1641,46 @@ function App() {
 
       world.step(1 / 60, delta, 3);
 
-      // Sync chassis + wheels
-      carGroup.position.copy(chassisBody.interpolatedPosition);
-      carGroup.quaternion.copy(chassisBody.interpolatedQuaternion);
+      // Sync chassis + wheels off the SAME (raw, non-interpolated) transform.
+      // vehicle.updateWheelTransform() derives each wheel's world pose from
+      // chassisBody.position/quaternion internally — if the visual chassis
+      // used interpolatedPosition/Quaternion instead, the body and wheels would
+      // read from two different points in time and visibly swim apart every
+      // frame the two didn't happen to match, which is what caused the shaky tyres.
+      carGroup.position.copy(chassisBody.position);
+      carGroup.quaternion.copy(chassisBody.quaternion);
       for (let i = 0; i < vehicle.wheelInfos.length; i++) {
         vehicle.updateWheelTransform(i);
         const t = vehicle.wheelInfos[i].worldTransform;
         wheels[i].position.copy(t.position);
         wheels[i].quaternion.copy(t.quaternion);
+      }
+
+      // ── TRICK / COMBO SCORING ───────────────────────────────────────────────
+      const isAirborne = vehicle.wheelInfos.every(w => !w.raycastResult.hasHit);
+      if (isAirborne) {
+        airborneTime += delta;
+        wasAirborne = true;
+      } else if (wasAirborne) {
+        // Landed — award points for real air time only, so bumps/curbs don't score
+        if (airborneTime > 0.35) {
+          const points = Math.round(Math.min(airborneTime, 2.5) * 120);
+          addScore(points, 'AIR TIME', '#4dabf7');
+        }
+        airborneTime = 0;
+        wasAirborne = false;
+      }
+
+      if (isSliding && speedVal > 3) {
+        driftTime += delta;
+        wasDrifting = true;
+      } else if (wasDrifting) {
+        if (driftTime > 0.5) {
+          const points = Math.round(Math.min(driftTime, 4) * 60);
+          addScore(points, 'DRIFT', '#ff922b');
+        }
+        driftTime = 0;
+        wasDrifting = false;
       }
 
       // Sync props (pins, blocks, ramps, cliffs)
@@ -1509,6 +1722,12 @@ function App() {
       zones.forEach(z => {
          z.ring.rotation.z += 0.02;
          z.ring.position.y = 1.5 + Math.sin(clock.elapsedTime * 2 + z.position.x) * 0.2;
+         if (z.beam) {
+            const isActive = activeZoneRef.current === z.id;
+            z.beam.material.opacity = THREE.MathUtils.lerp(z.beam.material.opacity, isActive ? 0.5 : 0, delta * 3);
+            z.beam.scale.y = THREE.MathUtils.lerp(z.beam.scale.y, isActive ? 1 : 0.001, delta * 3.5);
+            z.beam.rotation.y += delta * 0.6;
+         }
          if (z.monument) {
              const targetScale = (activeZoneRef.current === z.id) ? 1.0 : 0.001;
              z.monument.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.05);
@@ -1564,15 +1783,20 @@ function App() {
          }
       }
 
-      // Camera — frame-rate independent lerp using delta, use interpolated state to avoid stutter
-      const interpQ = chassisBody.interpolatedQuaternion;
-      const camQ = new THREE.Quaternion(interpQ.x, interpQ.y, interpQ.z, interpQ.w);
+      // Camera — frame-rate independent lerp using delta. Reads the SAME raw
+      // (non-interpolated) chassis transform as the visual car body/wheels —
+      // if the camera tracked the interpolated transform instead, it would
+      // glide smoothly while the car body jumped between physics steps,
+      // making the car look like it's shaking relative to the camera frame.
+      const camQ = new THREE.Quaternion(chassisBody.quaternion.x, chassisBody.quaternion.y, chassisBody.quaternion.z, chassisBody.quaternion.w);
       const camFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(camQ);
       const camYaw = Math.atan2(camFwd.x, camFwd.z);
-      const carPos = new THREE.Vector3().copy(chassisBody.interpolatedPosition);
+      const carPos = new THREE.Vector3(chassisBody.position.x, chassisBody.position.y, chassisBody.position.z);
       let distBehind = 6, targetFov = 45;
       if (speedKmh > 60) { distBehind = THREE.MathUtils.lerp(6, 8, (speedKmh-60)/40); targetFov = THREE.MathUtils.lerp(45, 65, (speedKmh-60)/40); }
-      
+      // Subtle cinematic push-in while inspecting a zone's hologram
+      if (activeZoneRef.current) targetFov = Math.min(targetFov, 40);
+
       const lerpFactorFast = 1.0 - Math.exp(-6.0 * delta);
       const lerpFactorSlow = 1.0 - Math.exp(-3.0 * delta);
 
@@ -1611,10 +1835,10 @@ function App() {
           ctx.stroke();
 
           // Get car position and yaw
-          const carX = chassisBody.interpolatedPosition.x;
-          const carZ = chassisBody.interpolatedPosition.z;
-          
-          const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(chassisBody.interpolatedQuaternion);
+          const carX = chassisBody.position.x;
+          const carZ = chassisBody.position.z;
+
+          const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(chassisBody.quaternion);
           const carYaw = Math.atan2(fwd.x, fwd.z);
 
           // Map scale: 1 unit in 3D = 1.1 pixels on canvas
@@ -1744,6 +1968,8 @@ function App() {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKey);
       window.removeEventListener('drive-to-zone', onDriveTo);
+      window.removeEventListener('keydown', unlockAudio);
+      container.removeEventListener('pointerdown', unlockAudio);
       cancelAnimationFrame(reqId);
       if (container && renderer.domElement) container.removeChild(renderer.domElement);
       renderer.dispose();
@@ -1978,169 +2204,137 @@ function App() {
           <div id="canvas-container" ref={canvasContainerRef}></div>
           
           
-          {/* Bruno Simon Style HUD / Overlays */}
-          {activeZone && (
-            <div className="game-hud-scroll" style={{
-              position: 'absolute', top: '0', right: '0', bottom: '0', width: '450px',
-              background: theme === 'dark' ? 'rgba(10, 10, 12, 0.9)' : 'rgba(255, 255, 255, 0.9)',
-              backdropFilter: 'blur(30px)', borderLeft: theme === 'dark' ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',
-              color: theme === 'dark' ? '#fff' : '#000', zIndex: 100,
-              boxShadow: '-20px 0 40px rgba(0,0,0,0.3)',
-              padding: '60px 40px', overflowY: 'auto',
-              animation: 'slideInRight 0.6s cubic-bezier(0.16, 1, 0.3, 1)',
-              display: 'flex', flexDirection: 'column'
+          {/* Signal terminal — entering a zone reads as picking up a transmission
+              from that zone's beacon/monument: a brief decrypt boot sequence,
+              then the content types out in a retro console. Fixed screen-space
+              overlay (not tracked to the 3D monument) so it can't drift
+              off-frame or get caught behind the camera's near plane. */}
+          {activeZone && (() => {
+            const phosphor = zoneColors[activeZone] || '#8FAF8C';
+            const dashData = {
+              hiresia: {
+                name: 'Hirevia ATS', type: 'FULL_STACK_ATS', status: 'PROJECT_UNLOCKED',
+                gaugeTitle: 'STACK', gaugeValue: 0.82,
+                tags: ['MongoDB', 'Express', 'React', 'Node.js', 'AWS', 'Vercel'],
+                ticker: projectsData.hiresia.bullets.join('     //     '),
+                action: { label: './visit_live_platform.sh →', href: projectsData.hiresia.link },
+              },
+              rapidrescue: {
+                name: 'RapidRescueQ', type: 'COORDINATION_PLATFORM', status: 'PROJECT_UNLOCKED',
+                gaugeTitle: 'STACK', gaugeValue: 0.75,
+                tags: ['React Native', 'WebRTC', 'Socket.io', 'Node.js', 'Expo', 'Render'],
+                ticker: projectsData.rapidrescue.bullets.join('     //     '),
+                action: { label: 'LIVE_DEMO :: PENDING', href: null },
+              },
+              about: {
+                name: 'Hitesh', type: 'CREATIVE_DEVELOPER', status: 'ZONE_REACHED',
+                gaugeTitle: 'FOCUS', gaugeValue: 0.88,
+                tags: ['Systems', 'Creative Coding', 'App Dev'],
+                ticker: 'Software engineer with a deep love for building fluid mobile applications and investor-facing web platforms.     //     Specializes in full-stack JavaScript, reactive UIs, and engaging 3D web spaces — the goal is to make computing intuitive, performant, and delightful.',
+                action: null,
+              },
+              experience: {
+                name: 'Experience', type: 'CAREER_TIMELINE', status: 'ZONE_REACHED',
+                gaugeTitle: 'ROLES', gaugeValue: 0.6,
+                tags: ['Grade Capital', 'Yzxx'],
+                ticker: 'APR 2024–PRESENT :: Software Dev Intern @ Grade Capital — production-ready mobile apps and investor-facing web platforms.     //     DEC 2023–APR 2024 :: App Dev Intern @ Yzxx — cross-platform mobile application with React Native and Expo.',
+                action: null,
+              },
+              stack: {
+                name: 'Tech Stack', type: 'SKILLS_MATRIX', status: 'ZONE_REACHED',
+                gaugeTitle: 'COVERAGE', gaugeValue: 0.9,
+                tags: ['React.js', 'React Native', 'Three.js', 'Node.js', 'Express', 'Socket.io', 'MongoDB', 'AWS', 'Docker'],
+                ticker: 'FRONTEND: React.js, React Native, Expo, Three.js, WebGL     //     BACKEND: Node.js, Express, Socket.io, REST     //     CLOUD: MongoDB, PostgreSQL, AWS, Vercel, Render, Docker',
+                action: null,
+              },
+              contact: {
+                name: 'Contact', type: 'GET_IN_TOUCH', status: 'ZONE_REACHED',
+                gaugeTitle: 'CHANNELS', gaugeValue: 1,
+                tags: ['EMAIL', 'GITHUB', 'LINKEDIN'],
+                ticker: 'EMAIL :: hitesh@example.com     //     GITHUB :: github.com/hitesh     //     LINKEDIN :: linkedin.com/in/hitesh',
+                action: null,
+              },
+            }[activeZone];
+
+            return (
+            <div className="dash-panel" style={{
+              position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)',
+              width: '760px', maxWidth: '96vw', zIndex: 100,
+              animation: 'dashSlideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
             }}>
               <style>{`
-                @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
-                .game-hud-scroll::-webkit-scrollbar { width: 6px; }
-                .game-hud-scroll::-webkit-scrollbar-track { background: transparent; }
-                .game-hud-scroll::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 10px; }
+                @keyframes dashSlideUp {
+                  from { opacity: 0; transform: translateX(-50%) translateY(40px); }
+                  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+                }
+                @keyframes dashTickerScroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+                .dash-body::-webkit-scrollbar { width: 6px; }
+                .dash-body::-webkit-scrollbar-track { background: transparent; }
+                .dash-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 10px; }
+                .dash-led { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
               `}</style>
-              
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 'bold', letterSpacing: '2px', color: '#8FAF8C' }}>
-                  {activeZone === 'hiresia' || activeZone === 'rapidrescue' ? 'PROJECT UNLOCKED' : 'ZONE REACHED'}
-                </span>
-                <span style={{ fontSize: '11px', opacity: 0.5, fontStyle: 'italic' }}>Zone: {activeZone}</span>
-              </div>
 
-              {/* Hiresia Zone */}
-              {activeZone === 'hiresia' && (
-                <div>
-                  <h2 style={{margin: '0 0 8px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>Hiresia ATS</h2>
-                  <span style={{ display: 'inline-block', padding: '4px 10px', background: '#FF6B6B', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>FULL STACK ATS</span>
-                  <p style={{lineHeight: '1.8', marginBottom: '24px', opacity: 0.8, fontSize: '15px'}}>A complete MERN-based Applicant Tracking System featuring advanced analytics, role-based access control, and seamless scheduling. Designed to handle hundreds of concurrent applications with zero downtime.</p>
-                  <ul style={{ paddingLeft: '20px', lineHeight: '1.8', marginBottom: '24px', fontSize: '14px', opacity: 0.85 }}>
-                    {projectsData.hiresia.bullets.map((b, i) => <li key={i} style={{ marginBottom: '8px' }}>{b}</li>)}
-                  </ul>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '24px' }}>
-                     {['MongoDB', 'Express', 'React', 'Node.js', 'AWS', 'Vercel'].map(tech => (
-                        <span key={tech} style={{ padding: '6px 12px', background: theme==='dark'?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
-                     ))}
+              <div className="dash-body" style={{
+                position: 'relative',
+                background: 'linear-gradient(165deg, #1a1c20, #0a0b0d 65%)',
+                borderTop: `3px solid ${phosphor}`,
+                borderLeft: `1px solid ${phosphor}40`,
+                borderRight: `1px solid ${phosphor}40`,
+                borderRadius: '18px 18px 0 0',
+                boxShadow: `0 -12px 44px rgba(0,0,0,0.55), 0 0 40px ${phosphor}25, inset 0 1px 0 rgba(255,255,255,0.06)`,
+                color: '#e9e9ec',
+                fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+                maxHeight: '58vh', overflowY: 'auto',
+                padding: '18px 28px 22px',
+              }}>
+                {/* Top row: status LED + LCD name/type readout */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '4px' }}>
+                    <span className="dash-led" style={{ background: phosphor, boxShadow: `0 0 8px ${phosphor}` }} />
+                    <span style={{ fontSize: '10px', letterSpacing: '1.5px', opacity: 0.65 }}>{dashData.status}</span>
                   </div>
-                  <InteractiveEl as="a" href={projectsData.hiresia.link} target="_blank" rel="noreferrer" className="btn-primary" style={{display: 'inline-block', textDecoration: 'none'}}>Visit Live Platform &rarr;</InteractiveEl>
-                </div>
-              )}
-
-              {/* RapidRescueQ Zone */}
-              {activeZone === 'rapidrescue' && (
-                <div>
-                  <h2 style={{margin: '0 0 8px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>RapidRescueQ</h2>
-                  <span style={{ display: 'inline-block', padding: '4px 10px', background: '#4CAF50', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>COORDINATION PLATFORM</span>
-                  <p style={{lineHeight: '1.8', marginBottom: '24px', opacity: 0.8, fontSize: '15px'}}>A live camera-based emergency reporting and coordination platform for public reporters and NGOs. Utilizes WebRTC for live streaming and geolocation for immediate dispatch.</p>
-                  <ul style={{ paddingLeft: '20px', lineHeight: '1.8', marginBottom: '24px', fontSize: '14px', opacity: 0.85 }}>
-                    {projectsData.rapidrescue.bullets.map((b, i) => <li key={i} style={{ marginBottom: '8px' }}>{b}</li>)}
-                  </ul>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '24px' }}>
-                     {['React Native', 'WebRTC', 'Socket.io', 'Node.js', 'Expo', 'Render'].map(tech => (
-                        <span key={tech} style={{ padding: '6px 12px', background: theme==='dark'?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
-                     ))}
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '20px', fontWeight: 700, textTransform: 'uppercase', color: phosphor, textShadow: `0 0 10px ${phosphor}80`, lineHeight: 1.15 }}>{dashData.name}</div>
+                    <div style={{ fontSize: '10px', opacity: 0.6, letterSpacing: '1px', marginTop: '2px' }}>{dashData.type}</div>
                   </div>
                 </div>
-              )}
 
-              {/* About Zone */}
-              {activeZone === 'about' && (
-                <div>
-                  <h2 style={{margin: '0 0 8px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>About Me</h2>
-                  <span style={{ display: 'inline-block', padding: '4px 10px', background: '#be4bdb', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>CREATIVE DEVELOPER</span>
-                  <p style={{lineHeight: '1.8', marginBottom: '20px', opacity: 0.85, fontSize: '15px'}}>
-                    Hello! I'm Hitesh, a software engineer with a deep love for building fluid mobile applications and investor-facing web platforms.
-                  </p>
-                  <p style={{lineHeight: '1.8', marginBottom: '24px', opacity: 0.8, fontSize: '15px'}}>
-                    I specialize in full-stack JavaScript development, reactive user interfaces, and engaging 3D web spaces. My goal is to make computing intuitive, performant, and delightful to interact with.
-                  </p>
-                  <h3 style={{ fontSize: '18px', marginBottom: '12px', borderBottom: theme==='dark'?'1px solid rgba(255,255,255,0.1)':'1px solid rgba(0,0,0,0.1)', paddingBottom: '8px' }}>Education & Interests</h3>
-                  <ul style={{ paddingLeft: '20px', lineHeight: '1.8', fontSize: '14px', opacity: 0.85, marginBottom: '0' }}>
-                    <li style={{ marginBottom: '6px' }}><strong>B.Tech in Computer Science</strong> — focus on systems and interfaces.</li>
-                    <li style={{ marginBottom: '6px' }}><strong>Creative Coding</strong> — Three.js, WebGL, shaders, and physics engines.</li>
-                    <li style={{ marginBottom: '6px' }}><strong>App Development</strong> — Expo, React Native, and mobile design systems.</li>
-                  </ul>
-                </div>
-              )}
-
-              {/* Experience Zone */}
-              {activeZone === 'experience' && (
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <h2 style={{margin: '0 0 8px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>Experience</h2>
-                  <span style={{ display: 'inline-block', padding: '4px 10px', background: '#ffd43b', color: '#000', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>CAREER TIMELINE</span>
-                  
-                  <div style={{ marginBottom: '24px', borderLeft: '2px solid #ffd43b', paddingLeft: '16px' }}>
-                    <div style={{ fontSize: '12px', opacity: 0.6, marginBottom: '4px', fontWeight: 'bold' }}>APR 2024 – PRESENT</div>
-                    <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '4px' }}>Software Dev Intern</div>
-                    <div style={{ fontSize: '14px', color: '#ffd43b', fontWeight: '500', marginBottom: '8px' }}>Grade Capital</div>
-                    <p style={{ fontSize: '14px', opacity: 0.8, lineHeight: '1.6' }}>Contributed to production-ready mobile apps and investor-facing web platforms using React Native and React.js.</p>
-                  </div>
-                  
-                  <div style={{ marginBottom: '24px', borderLeft: '2px solid rgba(255,255,255,0.2)', paddingLeft: '16px' }}>
-                    <div style={{ fontSize: '12px', opacity: 0.6, marginBottom: '4px', fontWeight: 'bold' }}>DEC 2023 – APR 2024</div>
-                    <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '4px' }}>App Dev Intern</div>
-                    <div style={{ fontSize: '14px', color: '#be4bdb', fontWeight: '500', marginBottom: '8px' }}>Yzxx</div>
-                    <p style={{ fontSize: '14px', opacity: 0.8, lineHeight: '1.6' }}>Designed and developed a cross-platform mobile application using React Native and Expo.</p>
+                {/* Middle row: gauge + tag legend */}
+                <div style={{ display: 'flex', gap: '22px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
+                  <InstrumentGauge title={dashData.gaugeTitle} value={dashData.gaugeValue} phosphor={phosphor} />
+                  <div style={{ flex: 1, minWidth: '220px' }}>
+                    <TermTags tags={dashData.tags} />
                   </div>
                 </div>
-              )}
 
-              {/* Stack Zone */}
-              {activeZone === 'stack' && (
-                <div>
-                  <h2 style={{margin: '0 0 8px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>Tech Stack</h2>
-                  <span style={{ display: 'inline-block', padding: '4px 10px', background: '#ff922b', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>SKILLS MATRIX</span>
-                  
-                  <div style={{ marginBottom: '20px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '10px' }}>Frontend & Immersive</div>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                       {['React.js', 'React Native', 'Expo', 'Three.js', 'WebGL', 'JavaScript (ES6+)'].map(tech => (
-                          <span key={tech} style={{ padding: '6px 12px', background: 'rgba(255,146,43,0.15)', border: '1px solid rgba(255,146,43,0.3)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
-                       ))}
-                    </div>
+                {/* LCD trip-computer ticker */}
+                <LcdTicker text={dashData.ticker} phosphor={phosphor} />
+
+                {/* Contact form — only zone that needs actual input, so it gets a slot below the instruments */}
+                {activeZone === 'contact' && (
+                  <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: `1px solid ${phosphor}30` }}>
+                    <ContactForm theme="dark" />
                   </div>
+                )}
 
-                  <div style={{ marginBottom: '20px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '10px' }}>Backend & Real-Time</div>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                       {['Node.js', 'Express', 'Socket.io', 'RESTful APIs'].map(tech => (
-                          <span key={tech} style={{ padding: '6px 12px', background: 'rgba(76,175,80,0.15)', border: '1px solid rgba(76,175,80,0.3)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
-                       ))}
-                    </div>
-                  </div>
-
-                  <div style={{ marginBottom: '20px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '10px' }}>Databases & Cloud</div>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                       {['MongoDB', 'PostgreSQL', 'AWS', 'Vercel', 'Render', 'Docker'].map(tech => (
-                          <span key={tech} style={{ padding: '6px 12px', background: 'rgba(77,171,247,0.15)', border: '1px solid rgba(77,171,247,0.3)', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{tech}</span>
-                       ))}
-                    </div>
+                {/* Bottom row: action + exit hint */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
+                  {dashData.action ? (
+                    dashData.action.href ? (
+                      <InteractiveEl as="a" href={dashData.action.href} target="_blank" rel="noreferrer" style={{ color: phosphor, textDecoration: 'none', fontSize: '12.5px', fontWeight: 700, border: `1px solid ${phosphor}66`, padding: '7px 13px', borderRadius: '4px' }}>{dashData.action.label}</InteractiveEl>
+                    ) : (
+                      <span style={{ fontSize: '11px', opacity: 0.5, letterSpacing: '0.5px' }}>{dashData.action.label}</span>
+                    )
+                  ) : <span />}
+                  <div style={{ fontSize: '10px', opacity: 0.55, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ border: `1px solid ${phosphor}66`, padding: '2px 6px', borderRadius: '3px', fontWeight: 700 }}>W</span>
+                    DRIVE AWAY TO CLOSE
                   </div>
                 </div>
-              )}
-
-              {/* Contact Zone */}
-              {activeZone === 'contact' && (
-                <div>
-                  <h2 style={{margin: '0 0 8px 0', fontSize: '42px', fontFamily: '"Instrument Serif", serif', lineHeight: '1.1'}}>Contact Me</h2>
-                  <span style={{ display: 'inline-block', padding: '4px 10px', background: '#ff6b6b', color: '#fff', fontSize: '10px', fontWeight: 'bold', borderRadius: '4px', marginBottom: '24px' }}>GET IN TOUCH</span>
-                  
-                  <div style={{ marginBottom: '20px', fontSize: '14px', opacity: 0.85 }}>
-                    <p style={{ marginBottom: '8px' }}><strong>Email:</strong> hitesh@example.com</p>
-                    <p style={{ marginBottom: '8px' }}><strong>GitHub:</strong> github.com/hitesh</p>
-                    <p style={{ marginBottom: '16px' }}><strong>LinkedIn:</strong> linkedin.com/in/hitesh</p>
-                  </div>
-                  
-                  <div style={{ borderTop: theme==='dark'?'1px solid rgba(255,255,255,0.1)':'1px solid rgba(0,0,0,0.1)', paddingTop: '20px' }}>
-                    <h4 style={{ margin: '0 0 12px 0', fontSize: '15px' }}>Send a Message</h4>
-                    <ContactForm theme={theme} />
-                  </div>
-                </div>
-              )}
-
-              <div style={{marginTop: 'auto', paddingTop: '40px', fontSize: '13px', opacity: 0.5, display: 'flex', alignItems: 'center', gap: '8px'}}>
-                 <span style={{background: theme === 'dark' ? '#333' : '#ddd', padding: '4px 8px', borderRadius: '4px', fontWeight: 'bold', color: theme==='dark'?'#fff':'#000'}}>W</span>
-                 Drive away or press W to exit
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* Minimap HUD */}
           <div style={{
@@ -2164,6 +2358,22 @@ function App() {
           }}>
             <canvas ref={minimapRef} width="160" height="160" style={{ display: 'block' }} />
           </div>
+
+          {/* Trick/Combo Score HUD */}
+          <div style={{
+            position: 'absolute', top: '100px', right: '30px', zIndex: 90,
+            background: theme === 'dark' ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.4)',
+            backdropFilter: 'blur(8px)', padding: '10px 20px', borderRadius: '14px',
+            color: theme === 'dark' ? '#fff' : '#000', textAlign: 'right', pointerEvents: 'none',
+            border: theme === 'dark' ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.05)',
+            transition: 'opacity 0.5s ease', opacity: isLoaded ? 1 : 0,
+          }}>
+            <div style={{ fontSize: '10px', opacity: 0.55, letterSpacing: '2px', fontWeight: 'bold' }}>SCORE</div>
+            <div ref={comboHudRef} style={{ fontSize: '26px', fontWeight: 'bold', fontFamily: '"Space Grotesk", sans-serif', lineHeight: 1.1 }}>0</div>
+          </div>
+
+          {/* Floating trick popups (air time / drift), positioned imperatively per-frame */}
+          <div ref={comboPopupLayerRef} style={{ position: 'absolute', inset: 0, zIndex: 95, pointerEvents: 'none', overflow: 'hidden' }} />
 
           <div style={{
             position: 'absolute', bottom: '30px', left: '30px', zIndex: 10,
